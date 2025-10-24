@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Bot, Library, MessageSquare, LogOut } from "lucide-react";
+import { Bot, Library, MessageSquare, LogOut, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
   const navItems = [
     { to: "/", icon: MessageSquare, label: "Chat" },
     { to: "/library", icon: Library, label: "Library" },
+    { to: "/dashboard", icon: BarChart3, label: "Dashboard" },
   ];
 
   return (
