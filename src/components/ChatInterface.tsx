@@ -1,42 +1,140 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Upload, Camera, Send, Sparkles } from "lucide-react";
+import { Upload, Camera, Send, Sparkles, History } from "lucide-react";
 import { toast } from "sonner";
 import { CodeViewer } from "./CodeViewer";
 import { generatePythonScript } from "@/utils/scriptGenerator";
+import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
   const [generatedCode, setGeneratedCode] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
     {
       role: "assistant",
       content: "Hello! I'm your AI automation assistant. I can help you create Python scripts for your workflows. Upload a PDF, capture your screen, or just describe what you need!",
     },
   ]);
+  const { user } = useAuth();
 
-  const handleSend = () => {
-    if (!message.trim()) return;
+  useEffect(() => {
+    if (user && !currentConversationId) {
+      createNewConversation();
+    }
+  }, [user]);
+
+  const createNewConversation = async () => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("conversations")
+      .insert({
+        user_id: user.id,
+        title: "New Workflow",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error creating conversation:", error);
+      toast.error("Failed to create conversation");
+      return;
+    }
+
+    setCurrentConversationId(data.id);
+    setMessages([
+      {
+        role: "assistant",
+        content: "Hello! I'm your AI automation assistant. I can help you create Python scripts for your workflows. Upload a PDF, capture your screen, or just describe what you need!",
+      },
+    ]);
+    setGeneratedCode("");
+  };
+
+  const loadConversation = async (conversationId: string) => {
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("Error loading messages:", error);
+      toast.error("Failed to load conversation");
+      return;
+    }
+
+    setCurrentConversationId(conversationId);
+    const loadedMessages = data.map((msg) => ({
+      role: msg.role as "user" | "assistant",
+      content: msg.content,
+    }));
+
+    // If there's code in the last message, show it
+    const lastMessageWithCode = data.reverse().find((msg) => msg.code);
+    if (lastMessageWithCode) {
+      setGeneratedCode(lastMessageWithCode.code);
+    }
+
+    setMessages(loadedMessages);
+  };
+
+  const saveMessage = async (role: "user" | "assistant", content: string, code?: string) => {
+    if (!currentConversationId) return;
+
+    const { error } = await supabase.from("chat_messages").insert({
+      conversation_id: currentConversationId,
+      role,
+      content,
+      code: code || null,
+    });
+
+    if (error) {
+      console.error("Error saving message:", error);
+    }
+
+    // Update conversation title if it's the first user message
+    if (role === "user" && messages.length === 1) {
+      const title = content.substring(0, 50) + (content.length > 50 ? "..." : "");
+      await supabase
+        .from("conversations")
+        .update({ title })
+        .eq("id", currentConversationId);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!message.trim() || !currentConversationId) return;
 
     const userMessage = message;
-    setMessages([...messages, { role: "user", content: userMessage }]);
+    const newMessages = [...messages, { role: "user" as const, content: userMessage }];
+    setMessages(newMessages);
     setMessage("");
 
+    // Save user message
+    await saveMessage("user", userMessage);
+
     // Generate Python script
-    setTimeout(() => {
+    setTimeout(async () => {
       const script = generatePythonScript(userMessage);
       setGeneratedCode(script);
-      
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "I've generated a Python script for your automation workflow. Check the code panel on the right to view, copy, or download it!",
-        },
-      ]);
+
+      const assistantMessage = {
+        role: "assistant" as const,
+        content: "I've generated a Python script for your automation workflow. Check the code panel on the right to view, copy, or download it!",
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      // Save assistant message with code
+      await saveMessage("assistant", assistantMessage.content, script);
     }, 800);
   };
 
@@ -50,6 +148,17 @@ export const ChatInterface = () => {
 
   return (
     <div className="h-[calc(100vh-12rem)] flex gap-4">
+      {/* Chat History Sidebar */}
+      {showHistory && (
+        <div className="w-64 flex-shrink-0">
+          <ChatHistory
+            currentConversationId={currentConversationId}
+            onSelectConversation={loadConversation}
+            onNewConversation={createNewConversation}
+          />
+        </div>
+      )}
+
       {/* Left Panel - Chat */}
       <div className="flex-1 flex flex-col gap-4">
         {/* Messages Area */}
@@ -78,6 +187,14 @@ export const ChatInterface = () => {
 
         {/* Action Buttons */}
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowHistory(!showHistory)}
+          >
+            <History className="w-4 h-4" />
+            {showHistory ? "Hide" : "Show"} History
+          </Button>
           <Button variant="outline" size="sm" onClick={handleUpload}>
             <Upload className="w-4 h-4" />
             Upload PDF

@@ -1,9 +1,12 @@
 import { Link, useLocation } from "react-router-dom";
-import { Bot, Library, MessageSquare } from "lucide-react";
+import { Bot, Library, MessageSquare, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { Button } from "@/components/ui/button";
 
 export const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
+  const { signOut, user } = useAuth();
 
   const navItems = [
     { to: "/", icon: MessageSquare, label: "Chat" },
@@ -24,23 +27,32 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
             </span>
           </Link>
 
-          <nav className="flex gap-2">
-            {navItems.map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-lg transition-all",
-                  location.pathname === item.to
-                    ? "bg-accent/10 text-accent shadow-glow"
-                    : "hover:bg-card/50 text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <item.icon className="w-4 h-4" />
-                <span className="font-medium">{item.label}</span>
-              </Link>
-            ))}
-          </nav>
+          <div className="flex items-center gap-4">
+            <nav className="flex gap-2">
+              {navItems.map((item) => (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg transition-all",
+                    location.pathname === item.to
+                      ? "bg-accent/10 text-accent shadow-glow"
+                      : "hover:bg-card/50 text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <item.icon className="w-4 h-4" />
+                  <span className="font-medium">{item.label}</span>
+                </Link>
+              ))}
+            </nav>
+
+            {user && (
+              <Button variant="ghost" size="sm" onClick={signOut}>
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            )}
+          </div>
         </div>
       </header>
 
