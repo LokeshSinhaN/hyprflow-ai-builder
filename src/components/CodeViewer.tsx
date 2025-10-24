@@ -2,8 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Copy, Download, Play } from "lucide-react";
 import { toast } from "sonner";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { Highlight, themes } from "prism-react-renderer";
 
 interface CodeViewerProps {
   code: string;
@@ -33,14 +32,6 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
     toast.info("Script execution will be available with Lovable Cloud backend");
   };
 
-  // Custom style to blend with our theme
-  const customStyle = {
-    background: "transparent",
-    fontSize: "0.875rem",
-    margin: 0,
-    padding: "1.5rem",
-  };
-
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -63,15 +54,33 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
 
       <Card className="flex-1 overflow-hidden bg-[#1e1e1e] backdrop-blur-sm border-border/50">
         <div className="h-full overflow-auto">
-          <SyntaxHighlighter
-            language={language}
-            style={vscDarkPlus}
-            customStyle={customStyle}
-            showLineNumbers
-            wrapLines
-          >
-            {code}
-          </SyntaxHighlighter>
+          <Highlight theme={themes.vsDark} code={code} language={language as any}>
+            {({ style, tokens, getLineProps, getTokenProps }) => (
+              <pre style={{ ...style, margin: 0, padding: "1.5rem", background: "transparent" }}>
+                {tokens.map((line, i) => (
+                  <div key={i} {...getLineProps({ line })} style={{ display: "table-row" }}>
+                    <span
+                      style={{
+                        display: "table-cell",
+                        textAlign: "right",
+                        paddingRight: "1em",
+                        userSelect: "none",
+                        opacity: 0.5,
+                        fontSize: "0.875rem",
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span style={{ display: "table-cell", fontSize: "0.875rem" }}>
+                      {line.map((token, key) => (
+                        <span key={key} {...getTokenProps({ token })} />
+                      ))}
+                    </span>
+                  </div>
+                ))}
+              </pre>
+            )}
+          </Highlight>
         </div>
       </Card>
     </div>
