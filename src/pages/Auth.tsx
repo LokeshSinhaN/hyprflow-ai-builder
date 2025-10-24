@@ -144,9 +144,37 @@ const Auth = () => {
         </div>
 
         <div className="mt-6 p-4 bg-muted/30 rounded-lg border border-border/30">
-          <p className="text-xs text-muted-foreground text-center mb-2 font-semibold">Demo Credentials</p>
-          <p className="text-xs text-muted-foreground">Email: demo@hyprflow.com</p>
-          <p className="text-xs text-muted-foreground">Password: demo123456</p>
+          <p className="text-xs text-muted-foreground text-center mb-3 font-semibold">
+            {isLogin ? "Demo Account" : "Create Demo Account"}
+          </p>
+          {isLogin ? (
+            <>
+              <p className="text-xs text-muted-foreground mb-2">
+                Don't have an account yet? Switch to sign up and use:
+              </p>
+              <p className="text-xs text-muted-foreground">Email: demo@hyprflow.com</p>
+              <p className="text-xs text-muted-foreground">Password: demo123456</p>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground mb-2">
+                Create your account with these credentials:
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={() => {
+                  setEmail("demo@hyprflow.com");
+                  setPassword("demo123456");
+                  setFullName("Demo User");
+                }}
+              >
+                Fill Demo Credentials
+              </Button>
+            </>
+          )}
         </div>
       </Card>
     </div>
