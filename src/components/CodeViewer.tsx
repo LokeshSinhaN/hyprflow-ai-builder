@@ -2,6 +2,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Copy, Download, Play } from "lucide-react";
 import { toast } from "sonner";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 interface CodeViewerProps {
   code: string;
@@ -31,6 +33,14 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
     toast.info("Script execution will be available with Lovable Cloud backend");
   };
 
+  // Custom style to blend with our theme
+  const customStyle = {
+    background: "transparent",
+    fontSize: "0.875rem",
+    margin: 0,
+    padding: "1.5rem",
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -51,10 +61,18 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
         </div>
       </div>
 
-      <Card className="flex-1 p-0 overflow-hidden bg-card/50 backdrop-blur-sm border-border/50">
-        <pre className="h-full overflow-auto p-6 text-sm">
-          <code className="text-foreground font-mono leading-relaxed">{code}</code>
-        </pre>
+      <Card className="flex-1 overflow-hidden bg-[#1e1e1e] backdrop-blur-sm border-border/50">
+        <div className="h-full overflow-auto">
+          <SyntaxHighlighter
+            language={language}
+            style={vscDarkPlus}
+            customStyle={customStyle}
+            showLineNumbers
+            wrapLines
+          >
+            {code}
+          </SyntaxHighlighter>
+        </div>
       </Card>
     </div>
   );
