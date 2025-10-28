@@ -6,8 +6,9 @@ const Index = () => {
     <Layout>
       <div className="space-y-4">
         <div>
-          <h1 className="text-3xl font-bold">AI Workflow Generator</h1>
-          <p className="text-muted-foreground mt-1">
+          <h1 className="text-3xl font-bold">hyprtask</h1>
+          <p className="text-sm text-muted-foreground -mt-1 mb-2">hyprFlow</p>
+          <p className="text-muted-foreground">
             Create powerful Python automation scripts with AI assistance
           </p>
         </div>

@@ -23,9 +23,14 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
             <div className="p-2 rounded-lg bg-gradient-primary shadow-glow">
               <Bot className="w-5 h-5 text-accent-foreground" />
             </div>
-            <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-              hyprFlow
-            </span>
+            <div className="flex flex-col">
+              <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+                hyprtask
+              </span>
+              <span className="text-xs text-muted-foreground -mt-1">
+                hyprFlow
+              </span>
+            </div>
           </Link>
 
           <div className="flex items-center gap-4">

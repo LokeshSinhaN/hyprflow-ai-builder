@@ -73,8 +73,9 @@ const Auth = () => {
               <Bot className="w-8 h-8 text-accent-foreground" />
             </div>
           </div>
-          <h1 className="text-3xl font-bold mb-2">hyprFlow</h1>
-          <p className="text-muted-foreground">AI Workflow Generator for hyprTeams</p>
+          <h1 className="text-3xl font-bold mb-1">hyprtask</h1>
+          <p className="text-sm text-muted-foreground mb-2">hyprFlow</p>
+          <p className="text-muted-foreground text-sm">Create powerful automation workflows with AI</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
