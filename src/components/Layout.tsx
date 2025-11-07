@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Bot, Library, MessageSquare, LogOut, BarChart3, Shield } from "lucide-react";
+import { Bot, Library, MessageSquare, LogOut, BarChart3, Shield, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,10 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
     { to: "/", icon: MessageSquare, label: "Chat" },
     { to: "/library", icon: Library, label: "Library" },
     { to: "/dashboard", icon: BarChart3, label: "Dashboard" },
-    ...(isAdmin ? [{ to: "/admin", icon: Shield, label: "Admin" }] : []),
+    ...(isAdmin ? [
+      { to: "/admin", icon: Shield, label: "Admin" },
+      { to: "/activity-logs", icon: Activity, label: "Activity Logs" }
+    ] : []),
   ];
 
   return (

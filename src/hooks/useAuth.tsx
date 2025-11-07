@@ -87,7 +87,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error, data } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -95,6 +95,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (error) {
       toast.error(error.message);
     } else {
+      // Log login activity
+      if (data.user) {
+        await supabase.rpc('log_user_activity', {
+          _user_id: data.user.id,
+          _activity_type: 'user_login',
+          _activity_description: 'User logged in successfully',
+          _metadata: {}
+        });
+      }
       toast.success("Welcome back!");
       navigate("/");
     }

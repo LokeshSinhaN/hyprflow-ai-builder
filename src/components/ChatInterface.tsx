@@ -125,6 +125,16 @@ export const ChatInterface = () => {
       const script = data.script;
       setGeneratedCode(script);
 
+      // Log script generation activity
+      if (user) {
+        await supabase.rpc('log_user_activity', {
+          _user_id: user.id,
+          _activity_type: 'script_generated',
+          _activity_description: 'User generated a Python script',
+          _metadata: { conversation_id: currentConversationId, prompt_length: userMessage.length }
+        });
+      }
+
       const assistantMessage = {
         role: "assistant" as const,
         content: "I've generated a Python script for your automation workflow. Check the code panel on the right to view, copy, or download it!",
