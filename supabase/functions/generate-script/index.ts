@@ -85,11 +85,48 @@ Always return ONLY the Python code without any markdown formatting or explanatio
       console.error('OpenAI API error:', response?.status, errorText);
       
       if (response?.status === 429) {
+        const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+        if (LOVABLE_API_KEY) {
+          console.log('Rate limited by OpenAI. Falling back to Lovable AI gateway...');
+          try {
+            const fallback = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${LOVABLE_API_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'google/gemini-2.5-flash',
+                messages: [
+                  {
+                    role: 'system',
+                    content: `You are a Python automation script generator. Generate complete, working Python scripts based on user requests. \nInclude necessary imports, proper error handling, and clear comments. \nFocus on healthcare automation tasks like patient registration, insurance verification, claims submission, lab orders, appointments, and payment processing.\nAlways return ONLY the Python code without any markdown formatting or explanations.`,
+                  },
+                  { role: 'user', content: message },
+                ],
+              }),
+            });
+
+            if (fallback.ok) {
+              const j = await fallback.json();
+              const script = j.choices?.[0]?.message?.content ?? '';
+              return new Response(JSON.stringify({ script }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              });
+            } else {
+              console.error('Lovable AI fallback failed:', fallback.status, await fallback.text());
+            }
+          } catch (e) {
+            console.error('Lovable AI fallback error:', e);
+          }
+        }
+
         return new Response(
-          JSON.stringify({ 
-            error: 'OpenAI rate limit reached. Please check your API quota at platform.openai.com or wait a moment and try again.' 
+          JSON.stringify({
+            error:
+              'OpenAI rate limit reached. Please check your API quota at platform.openai.com or wait a moment and try again.',
           }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
         );
       }
       
