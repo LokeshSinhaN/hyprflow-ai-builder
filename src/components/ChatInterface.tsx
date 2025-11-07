@@ -15,12 +15,7 @@ export const ChatInterface = () => {
   const [generatedCode, setGeneratedCode] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
-    {
-      role: "assistant",
-      content: "Hello! I'm your AI automation assistant. I can help you create Python scripts for your workflows. Upload a PDF, capture your screen, or just describe what you need!",
-    },
-  ]);
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -48,12 +43,7 @@ export const ChatInterface = () => {
     }
 
     setCurrentConversationId(data.id);
-    setMessages([
-      {
-        role: "assistant",
-        content: "Hello! I'm your AI automation assistant. I can help you create Python scripts for your workflows. Upload a PDF, capture your screen, or just describe what you need!",
-      },
-    ]);
+    setMessages([]);
     setGeneratedCode("");
   };
 
@@ -100,7 +90,7 @@ export const ChatInterface = () => {
     }
 
     // Update conversation title if it's the first user message
-    if (role === "user" && messages.length === 1) {
+    if (role === "user" && messages.length === 0) {
       const title = content.substring(0, 50) + (content.length > 50 ? "..." : "");
       await supabase
         .from("conversations")
