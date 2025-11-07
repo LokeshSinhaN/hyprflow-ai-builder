@@ -5,10 +5,9 @@ import { Card } from "@/components/ui/card";
 import { Upload, Camera, Send, Sparkles, History } from "lucide-react";
 import { toast } from "sonner";
 import { CodeViewer } from "./CodeViewer";
-import { generatePythonScript } from "@/utils/scriptGenerator";
+import { supabase } from "@/integrations/supabase/client";
 import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
 export const ChatInterface = () => {
@@ -121,9 +120,19 @@ export const ChatInterface = () => {
     // Save user message
     await saveMessage("user", userMessage);
 
-    // Generate Python script
-    setTimeout(async () => {
-      const script = generatePythonScript(userMessage);
+    try {
+      // Call edge function to generate Python script with AI
+      const { data, error } = await supabase.functions.invoke('generate-script', {
+        body: { message: userMessage }
+      });
+
+      if (error) throw error;
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      const script = data.script;
       setGeneratedCode(script);
 
       const assistantMessage = {
@@ -135,7 +144,10 @@ export const ChatInterface = () => {
 
       // Save assistant message with code
       await saveMessage("assistant", assistantMessage.content, script);
-    }, 800);
+    } catch (error) {
+      console.error("Error generating script:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to generate script. Please try again.");
+    }
   };
 
   const handleUpload = () => {
