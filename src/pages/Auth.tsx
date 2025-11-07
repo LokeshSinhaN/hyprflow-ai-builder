@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Bot, Sparkles } from "lucide-react";
 import { z } from "zod";
+import logo from "@/assets/logo.png";
 
 const emailSchema = z.string().email("Invalid email address").max(255);
 const passwordSchema = z.string().min(6, "Password must be at least 6 characters");
@@ -69,9 +70,7 @@ const Auth = () => {
       <Card className="w-full max-w-md p-8 bg-card/50 backdrop-blur-lg border-border/50">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
-            <div className="p-3 rounded-xl bg-gradient-primary shadow-glow">
-              <Bot className="w-8 h-8 text-accent-foreground" />
-            </div>
+            <img src={logo} alt="hyprtask logo" className="w-16 h-16 rounded-lg" />
           </div>
           <h1 className="text-3xl font-bold mb-1">hyprtask</h1>
           <p className="text-sm text-muted-foreground mb-2">hyprFlow</p>
