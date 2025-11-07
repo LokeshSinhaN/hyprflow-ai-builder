@@ -1,1 +1,7 @@
 project_id = "dwtdcpevecugfqncmfvp"
+
+[functions.validate-email-domain]
+verify_jwt = false
+
+[functions.approve-user]
+verify_jwt = true
