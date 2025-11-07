@@ -68,7 +68,7 @@ const Auth = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative" style={{ background: 'var(--background-gradient)' }}>
-      <div className="absolute top-4 left-4">
+      <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
       <Card className="w-full max-w-md p-8 bg-card/50 backdrop-blur-lg border-border/50">
