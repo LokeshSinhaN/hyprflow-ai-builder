@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import logo from "@/assets/logo.png";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
@@ -16,21 +17,24 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-secondary">
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--background-gradient)' }}>
       {/* Header */}
       <header className="border-b border-border/50 backdrop-blur-lg bg-card/30 sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 group">
-            <img src={logo} alt="hyprtask logo" className="w-8 h-8 rounded-lg" />
-            <div className="flex flex-col">
-              <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-                hyprtask
-              </span>
-              <span className="text-xs text-muted-foreground -mt-1">
-                hyprFlow
-              </span>
-            </div>
-          </Link>
+          <div className="flex items-center gap-4">
+            <ThemeToggle />
+            <Link to="/" className="flex items-center gap-2 group">
+              <img src={logo} alt="hyprtask logo" className="w-8 h-8 rounded-lg" />
+              <div className="flex flex-col">
+                <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+                  hyprtask
+                </span>
+                <span className="text-xs text-muted-foreground -mt-1">
+                  hyprFlow
+                </span>
+              </div>
+            </Link>
+          </div>
 
           <div className="flex items-center gap-4">
             <nav className="flex gap-2">

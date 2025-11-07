@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Bot, Sparkles } from "lucide-react";
 import { z } from "zod";
 import logo from "@/assets/logo.png";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const emailSchema = z.string().email("Invalid email address").max(255);
 const passwordSchema = z.string().min(6, "Password must be at least 6 characters");
@@ -66,7 +67,10 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-secondary p-4">
+    <div className="min-h-screen flex items-center justify-center p-4 relative" style={{ background: 'var(--background-gradient)' }}>
+      <div className="absolute top-4 left-4">
+        <ThemeToggle />
+      </div>
       <Card className="w-full max-w-md p-8 bg-card/50 backdrop-blur-lg border-border/50">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
