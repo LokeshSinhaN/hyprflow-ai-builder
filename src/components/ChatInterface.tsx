@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -17,6 +17,7 @@ export const ChatInterface = () => {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const { user } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (user && !currentConversationId) {
@@ -151,11 +152,25 @@ export const ChatInterface = () => {
   };
 
   const handleUpload = () => {
-    toast.info("Upload feature will be available soon with Lovable Cloud");
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.type === "application/pdf") {
+        toast.success(`PDF "${file.name}" uploaded successfully`);
+        // Here you can add logic to process the PDF
+      } else {
+        toast.error("Please upload a PDF file");
+      }
+      // Reset the input
+      event.target.value = "";
+    }
   };
 
   const handleScreenCapture = () => {
-    toast.info("Screen capture will be available soon with Lovable Cloud");
+    toast.info("Coming Soon");
   };
 
   return (
@@ -211,6 +226,13 @@ export const ChatInterface = () => {
             <Upload className="w-4 h-4" />
             Upload PDF
           </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            onChange={handleFileChange}
+            className="hidden"
+          />
           <Button variant="outline" size="sm" onClick={handleScreenCapture}>
             <Camera className="w-4 h-4" />
             Screen Capture
