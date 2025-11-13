@@ -10,6 +10,8 @@ import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 
+const MAX_MESSAGE_LENGTH = 10000;
+
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
   const [generatedCode, setGeneratedCode] = useState("");
@@ -102,6 +104,11 @@ export const ChatInterface = () => {
 
   const handleSend = async () => {
     if (!message.trim() || !currentConversationId) return;
+    
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      toast.error(`Message too long. Maximum ${MAX_MESSAGE_LENGTH.toLocaleString()} characters allowed.`);
+      return;
+    }
 
     const userMessage = message;
     const newMessages = [...messages, { role: "user" as const, content: userMessage }];

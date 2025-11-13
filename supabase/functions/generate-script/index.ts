@@ -1,10 +1,18 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const messageSchema = z.object({
+  message: z.string()
+    .trim()
+    .min(1, 'Message cannot be empty')
+    .max(10000, 'Message must be less than 10,000 characters')
+});
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -12,7 +20,17 @@ serve(async (req) => {
   }
 
   try {
-    const { message } = await req.json();
+    const body = await req.json();
+    const validation = messageSchema.safeParse(body);
+    
+    if (!validation.success) {
+      return new Response(
+        JSON.stringify({ error: validation.error.issues[0].message }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    const { message } = validation.data;
     console.log('Received message:', message);
     
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
