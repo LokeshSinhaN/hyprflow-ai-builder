@@ -11,7 +11,8 @@ const messageSchema = z.object({
   message: z.string()
     .trim()
     .min(1, 'Message cannot be empty')
-    .max(10000, 'Message must be less than 10,000 characters')
+    .max(10000, 'Message must be less than 10,000 characters'),
+  document: z.string().optional()
 });
 
 serve(async (req) => {
@@ -30,8 +31,9 @@ serve(async (req) => {
       );
     }
     
-    const { message } = validation.data;
+    const { message, document } = validation.data;
     console.log('Received message:', message);
+    console.log('Has document:', !!document);
     
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     
@@ -62,11 +64,14 @@ serve(async (req) => {
                 content: `You are a Python automation script generator. Generate complete, working Python scripts based on user requests. 
 Include necessary imports, proper error handling, and clear comments. 
 Focus on healthcare automation tasks like patient registration, insurance verification, claims submission, lab orders, appointments, and payment processing.
+When a document is provided, analyze it carefully and generate Python scripts that automate the workflow described in the document.
 Always return ONLY the Python code without any markdown formatting or explanations.`
               },
               {
                 role: 'user',
-                content: message
+                content: document 
+                  ? `Here is an SOP workflow document:\n\n${document}\n\nBased on this document: ${message}`
+                  : message
               }
             ],
             max_completion_tokens: 2000,

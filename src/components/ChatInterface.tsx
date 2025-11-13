@@ -18,6 +18,8 @@ export const ChatInterface = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -121,7 +123,10 @@ export const ChatInterface = () => {
     try {
       // Call edge function to generate Python script with AI
       const { data, error } = await supabase.functions.invoke('generate-script', {
-        body: { message: userMessage }
+        body: { 
+          message: userMessage,
+          document: uploadedDocument 
+        }
       });
 
       if (error) throw error;
@@ -152,6 +157,11 @@ export const ChatInterface = () => {
 
       // Save assistant message with code
       await saveMessage("assistant", assistantMessage.content, script);
+      
+      // Clear uploaded document after successful generation
+      if (uploadedDocument) {
+        setUploadedDocument(null);
+      }
     } catch (error) {
       console.error("Error generating script:", error);
       toast.error(error instanceof Error ? error.message : "Failed to generate script. Please try again.");
@@ -162,16 +172,50 @@ export const ChatInterface = () => {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      if (file.type === "application/pdf") {
-        toast.success(`PDF "${file.name}" uploaded successfully`);
-        // Here you can add logic to process the PDF
-      } else {
-        toast.error("Please upload a PDF file");
-      }
-      // Reset the input
+    if (!file) return;
+
+    if (file.type !== "application/pdf") {
+      toast.error("Please upload a PDF file");
+      event.target.value = "";
+      return;
+    }
+
+    setIsProcessing(true);
+    toast.loading(`Processing "${file.name}"...`);
+
+    try {
+      // Upload file to temporary storage
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // Create a temporary file path
+      const tempPath = `user-uploads://${file.name}`;
+      
+      // Create blob from file
+      const arrayBuffer = await file.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: file.type });
+      
+      // Store file temporarily (you would need to implement actual file storage)
+      // For now, we'll read the file content directly
+      const reader = new FileReader();
+      
+      reader.onload = async (e) => {
+        const content = e.target?.result;
+        if (typeof content === 'string') {
+          setUploadedDocument(content);
+          toast.success(`SOP document "${file.name}" processed successfully! You can now ask me to generate automation scripts based on it.`);
+          setMessage(`Generate a Python automation script based on the uploaded SOP workflow document.`);
+        }
+      };
+      
+      reader.readAsText(file);
+    } catch (error) {
+      console.error("Error processing PDF:", error);
+      toast.error("Failed to process PDF. Please try again.");
+    } finally {
+      setIsProcessing(false);
       event.target.value = "";
     }
   };
@@ -229,9 +273,14 @@ export const ChatInterface = () => {
             <History className="w-4 h-4" />
             {showHistory ? "Hide" : "Show"} History
           </Button>
-          <Button variant="outline" size="sm" onClick={handleUpload}>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleUpload}
+            disabled={isProcessing}
+          >
             <Upload className="w-4 h-4" />
-            Upload PDF
+            {uploadedDocument ? "SOP Uploaded ✓" : "Upload SOP"}
           </Button>
           <input
             ref={fileInputRef}
@@ -251,7 +300,7 @@ export const ChatInterface = () => {
           <Textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="Describe the automation workflow you need..."
+            placeholder={uploadedDocument ? "Ask me to generate automation scripts based on your uploaded SOP..." : "Describe the automation workflow you need..."}
             className="min-h-[100px] resize-none bg-card/50 backdrop-blur-sm border-border/50 focus:border-accent/50"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
