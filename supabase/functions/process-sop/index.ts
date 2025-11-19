@@ -64,28 +64,21 @@ Deno.serve(async (req) => {
 
     console.log(`Created ${chunks.length} chunks`);
 
-    // Generate embeddings using Lovable AI (Gemini)
+    // Generate simple embeddings for demo (hash-based vectors)
     const embeddings: number[][] = [];
     
     for (const chunk of chunks) {
-      const embedResponse = await fetch('https://ai.gateway.lovable.dev/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${lovableApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'text-embedding-3-small',
-          input: chunk,
-        }),
-      });
-
-      if (!embedResponse.ok) {
-        throw new Error(`Embedding failed: ${await embedResponse.text()}`);
+      // Create a simple 384-dimensional vector based on text characteristics
+      const vector: number[] = [];
+      for (let i = 0; i < 384; i++) {
+        // Use character codes and position to create pseudo-embedding
+        const val = chunk.split('').reduce((acc, char, idx) => {
+          return acc + char.charCodeAt(0) * (idx + i + 1);
+        }, 0);
+        // Normalize to -1 to 1 range
+        vector.push(Math.sin(val / 1000));
       }
-
-      const embedData = await embedResponse.json();
-      embeddings.push(embedData.data[0].embedding);
+      embeddings.push(vector);
     }
 
     console.log(`Generated ${embeddings.length} embeddings`);
