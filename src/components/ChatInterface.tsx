@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Upload, Camera, Send, Sparkles, History } from "lucide-react";
+import { Upload, Camera, Send, Sparkles, History, FileText, X } from "lucide-react";
 import { toast } from "sonner";
 import { CodeViewer } from "./CodeViewer";
 import { generatePythonScript } from "@/utils/scriptGenerator";
@@ -10,6 +10,14 @@ import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { Progress } from "@/components/ui/progress";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
@@ -22,6 +30,11 @@ export const ChatInterface = () => {
       content: "Hello! I'm your AI automation assistant. I can help you create Python scripts for your workflows. Upload a PDF, capture your screen, or just describe what you need!",
     },
   ]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -139,7 +152,79 @@ export const ChatInterface = () => {
   };
 
   const handleUpload = () => {
-    toast.info("Upload feature will be available soon with Lovable Cloud");
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== "application/pdf") {
+      toast.error("Please upload a PDF file");
+      return;
+    }
+
+    if (!user) {
+      toast.error("Please sign in to upload SOPs");
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgress(0);
+    setUploadedFileName(file.name);
+
+    try {
+      // Simulate upload progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 200);
+
+      // Upload to Supabase Storage
+      const fileName = `${user.id}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("sop_documents")
+        .upload(fileName, file);
+
+      clearInterval(progressInterval);
+
+      if (uploadError) throw uploadError;
+
+      setUploadProgress(100);
+
+      // Store metadata in database
+      const { error: dbError } = await supabase.from("sop_documents").insert({
+        user_id: user.id,
+        filename: file.name,
+        title: file.name.replace(".pdf", ""),
+        storage_path: fileName,
+        file_size: file.size,
+        status: "processing",
+      });
+
+      if (dbError) throw dbError;
+
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadProgress(0);
+        setShowSuccessDialog(true);
+      }, 500);
+    } catch (error) {
+      console.error("Upload error:", error);
+      toast.error("Failed to upload SOP");
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   const handleScreenCapture = () => {
@@ -185,6 +270,18 @@ export const ChatInterface = () => {
           ))}
         </div>
 
+        {/* Upload Progress Bar */}
+        {isUploading && (
+          <Card className="p-4 bg-card/80 backdrop-blur-sm border-accent/30">
+            <div className="flex items-center gap-3 mb-2">
+              <FileText className="w-5 h-5 text-accent animate-pulse" />
+              <span className="text-sm font-medium">Uploading {uploadedFileName}...</span>
+            </div>
+            <Progress value={uploadProgress} className="h-2" />
+            <p className="text-xs text-muted-foreground mt-2">{uploadProgress}% complete</p>
+          </Card>
+        )}
+
         {/* Action Buttons */}
         <div className="flex gap-2">
           <Button
@@ -195,15 +292,27 @@ export const ChatInterface = () => {
             <History className="w-4 h-4" />
             {showHistory ? "Hide" : "Show"} History
           </Button>
-          <Button variant="outline" size="sm" onClick={handleUpload}>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleUpload}
+            disabled={isUploading}
+          >
             <Upload className="w-4 h-4" />
-            Upload PDF
+            Upload SOP
           </Button>
           <Button variant="outline" size="sm" onClick={handleScreenCapture}>
             <Camera className="w-4 h-4" />
             Screen Capture
           </Button>
         </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf"
+          onChange={handleFileSelect}
+          className="hidden"
+        />
 
         {/* Input Area */}
         <div className="flex gap-2">
@@ -239,6 +348,31 @@ export const ChatInterface = () => {
           </Card>
         )}
       </div>
+
+      {/* Success Dialog */}
+      <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-full bg-gradient-primary">
+                <FileText className="w-6 h-6 text-accent-foreground" />
+              </div>
+              <DialogTitle>SOP Uploaded Successfully!</DialogTitle>
+            </div>
+            <DialogDescription className="pt-4">
+              <span className="font-medium text-foreground">{uploadedFileName}</span> has been uploaded and is being processed.
+              You can now use this SOP to generate automation scripts.
+            </DialogDescription>
+          </DialogHeader>
+          <Button 
+            onClick={() => setShowSuccessDialog(false)}
+            className="w-full"
+            variant="default"
+          >
+            Got it
+          </Button>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
