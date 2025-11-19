@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
 
     // Download PDF from storage
     const { data: fileData, error: downloadError } = await supabase.storage
-      .from('sop-documents')
+      .from('sop_documents')
       .download(storagePath);
 
     if (downloadError) {
