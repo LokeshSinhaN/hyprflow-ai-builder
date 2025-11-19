@@ -188,7 +188,7 @@ export const ChatInterface = () => {
       // Upload to Supabase Storage
       const fileName = `${user.id}/${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage
-        .from("sop_documents")
+        .from("sop-documents")
         .upload(fileName, file);
 
       clearInterval(progressInterval);
