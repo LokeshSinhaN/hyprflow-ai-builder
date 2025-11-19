@@ -83,9 +83,6 @@ export type Database = {
       }
       profiles: {
         Row: {
-          approved: boolean | null
-          approved_at: string | null
-          approved_by: string | null
           created_at: string
           email: string | null
           full_name: string | null
@@ -93,9 +90,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          approved?: boolean | null
-          approved_at?: string | null
-          approved_by?: string | null
           created_at?: string
           email?: string | null
           full_name?: string | null
@@ -103,148 +97,11 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          approved?: boolean | null
-          approved_at?: string | null
-          approved_by?: string | null
           created_at?: string
           email?: string | null
           full_name?: string | null
           id?: string
           updated_at?: string
-        }
-        Relationships: []
-      }
-      sop_chunks: {
-        Row: {
-          chunk_index: number
-          content: string
-          created_at: string
-          id: string
-          qdrant_point_id: string
-          sop_id: string
-          token_count: number | null
-        }
-        Insert: {
-          chunk_index: number
-          content: string
-          created_at?: string
-          id?: string
-          qdrant_point_id: string
-          sop_id: string
-          token_count?: number | null
-        }
-        Update: {
-          chunk_index?: number
-          content?: string
-          created_at?: string
-          id?: string
-          qdrant_point_id?: string
-          sop_id?: string
-          token_count?: number | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sop_chunks_sop_id_fkey"
-            columns: ["sop_id"]
-            isOneToOne: false
-            referencedRelation: "sop_documents"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      sop_documents: {
-        Row: {
-          content: string | null
-          created_at: string
-          file_size: number | null
-          filename: string
-          id: string
-          page_count: number | null
-          status: string
-          storage_path: string | null
-          title: string
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          content?: string | null
-          created_at?: string
-          file_size?: number | null
-          filename: string
-          id?: string
-          page_count?: number | null
-          status?: string
-          storage_path?: string | null
-          title: string
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          content?: string | null
-          created_at?: string
-          file_size?: number | null
-          filename?: string
-          id?: string
-          page_count?: number | null
-          status?: string
-          storage_path?: string | null
-          title?: string
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
-      user_activity_logs: {
-        Row: {
-          activity_description: string
-          activity_type: string
-          created_at: string
-          id: string
-          ip_address: string | null
-          metadata: Json | null
-          user_agent: string | null
-          user_id: string
-        }
-        Insert: {
-          activity_description: string
-          activity_type: string
-          created_at?: string
-          id?: string
-          ip_address?: string | null
-          metadata?: Json | null
-          user_agent?: string | null
-          user_id: string
-        }
-        Update: {
-          activity_description?: string
-          activity_type?: string
-          created_at?: string
-          id?: string
-          ip_address?: string | null
-          metadata?: Json | null
-          user_agent?: string | null
-          user_id?: string
-        }
-        Relationships: []
-      }
-      user_roles: {
-        Row: {
-          created_at: string | null
-          id: string
-          role: Database["public"]["Enums"]["app_role"]
-          user_id: string
-        }
-        Insert: {
-          created_at?: string | null
-          id?: string
-          role?: Database["public"]["Enums"]["app_role"]
-          user_id: string
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          role?: Database["public"]["Enums"]["app_role"]
-          user_id?: string
         }
         Relationships: []
       }
@@ -253,26 +110,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
-        }
-        Returns: boolean
-      }
-      is_admin: { Args: { _user_id: string }; Returns: boolean }
-      log_user_activity: {
-        Args: {
-          _activity_description: string
-          _activity_type: string
-          _metadata?: Json
-          _user_id: string
-        }
-        Returns: string
-      }
+      [_ in never]: never
     }
     Enums: {
-      app_role: "admin" | "user"
+      [_ in never]: never
     }
     CompositeTypes: {
       [_ in never]: never
@@ -399,8 +240,6 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {
-      app_role: ["admin", "user"],
-    },
+    Enums: {},
   },
 } as const

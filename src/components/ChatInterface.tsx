@@ -1,27 +1,28 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Upload, Camera, Send, Sparkles, History } from "lucide-react";
 import { toast } from "sonner";
 import { CodeViewer } from "./CodeViewer";
-import { supabase } from "@/integrations/supabase/client";
+import { generatePythonScript } from "@/utils/scriptGenerator";
 import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
-
-const MAX_MESSAGE_LENGTH = 10000;
 
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
   const [generatedCode, setGeneratedCode] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
-  const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
+    {
+      role: "assistant",
+      content: "Hello! I'm your AI automation assistant. I can help you create Python scripts for your workflows. Upload a PDF, capture your screen, or just describe what you need!",
+    },
+  ]);
   const { user } = useAuth();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (user && !currentConversationId) {
@@ -48,7 +49,12 @@ export const ChatInterface = () => {
     }
 
     setCurrentConversationId(data.id);
-    setMessages([]);
+    setMessages([
+      {
+        role: "assistant",
+        content: "Hello! I'm your AI automation assistant. I can help you create Python scripts for your workflows. Upload a PDF, capture your screen, or just describe what you need!",
+      },
+    ]);
     setGeneratedCode("");
   };
 
@@ -95,7 +101,7 @@ export const ChatInterface = () => {
     }
 
     // Update conversation title if it's the first user message
-    if (role === "user" && messages.length === 0) {
+    if (role === "user" && messages.length === 1) {
       const title = content.substring(0, 50) + (content.length > 50 ? "..." : "");
       await supabase
         .from("conversations")
@@ -106,11 +112,6 @@ export const ChatInterface = () => {
 
   const handleSend = async () => {
     if (!message.trim() || !currentConversationId) return;
-    
-    if (message.length > MAX_MESSAGE_LENGTH) {
-      toast.error(`Message too long. Maximum ${MAX_MESSAGE_LENGTH.toLocaleString()} characters allowed.`);
-      return;
-    }
 
     const userMessage = message;
     const newMessages = [...messages, { role: "user" as const, content: userMessage }];
@@ -120,33 +121,10 @@ export const ChatInterface = () => {
     // Save user message
     await saveMessage("user", userMessage);
 
-    try {
-      // Call edge function to generate Python script with AI
-      const { data, error } = await supabase.functions.invoke('generate-script', {
-        body: { 
-          message: userMessage,
-          document: uploadedDocument 
-        }
-      });
-
-      if (error) throw error;
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      const script = data.script;
+    // Generate Python script
+    setTimeout(async () => {
+      const script = generatePythonScript(userMessage);
       setGeneratedCode(script);
-
-      // Log script generation activity
-      if (user) {
-        await supabase.rpc('log_user_activity', {
-          _user_id: user.id,
-          _activity_type: 'script_generated',
-          _activity_description: 'User generated a Python script',
-          _metadata: { conversation_id: currentConversationId, prompt_length: userMessage.length }
-        });
-      }
 
       const assistantMessage = {
         role: "assistant" as const,
@@ -157,71 +135,15 @@ export const ChatInterface = () => {
 
       // Save assistant message with code
       await saveMessage("assistant", assistantMessage.content, script);
-      
-      // Clear uploaded document after successful generation
-      if (uploadedDocument) {
-        setUploadedDocument(null);
-      }
-    } catch (error) {
-      console.error("Error generating script:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to generate script. Please try again.");
-    }
+    }, 800);
   };
 
   const handleUpload = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    if (file.type !== "application/pdf") {
-      toast.error("Please upload a PDF file");
-      event.target.value = "";
-      return;
-    }
-
-    setIsProcessing(true);
-    toast.loading(`Processing "${file.name}"...`);
-
-    try {
-      // Upload file to temporary storage
-      const formData = new FormData();
-      formData.append('file', file);
-
-      // Create a temporary file path
-      const tempPath = `user-uploads://${file.name}`;
-      
-      // Create blob from file
-      const arrayBuffer = await file.arrayBuffer();
-      const blob = new Blob([arrayBuffer], { type: file.type });
-      
-      // Store file temporarily (you would need to implement actual file storage)
-      // For now, we'll read the file content directly
-      const reader = new FileReader();
-      
-      reader.onload = async (e) => {
-        const content = e.target?.result;
-        if (typeof content === 'string') {
-          setUploadedDocument(content);
-          toast.success(`SOP document "${file.name}" processed successfully! You can now ask me to generate automation scripts based on it.`);
-          setMessage(`Generate a Python automation script based on the uploaded SOP workflow document.`);
-        }
-      };
-      
-      reader.readAsText(file);
-    } catch (error) {
-      console.error("Error processing PDF:", error);
-      toast.error("Failed to process PDF. Please try again.");
-    } finally {
-      setIsProcessing(false);
-      event.target.value = "";
-    }
+    toast.info("Upload feature will be available soon with Lovable Cloud");
   };
 
   const handleScreenCapture = () => {
-    toast.info("Coming Soon");
+    toast.info("Screen capture will be available soon with Lovable Cloud");
   };
 
   return (
@@ -273,22 +195,10 @@ export const ChatInterface = () => {
             <History className="w-4 h-4" />
             {showHistory ? "Hide" : "Show"} History
           </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleUpload}
-            disabled={isProcessing}
-          >
+          <Button variant="outline" size="sm" onClick={handleUpload}>
             <Upload className="w-4 h-4" />
-            {uploadedDocument ? "SOP Uploaded ✓" : "Upload SOP"}
+            Upload PDF
           </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            onChange={handleFileChange}
-            className="hidden"
-          />
           <Button variant="outline" size="sm" onClick={handleScreenCapture}>
             <Camera className="w-4 h-4" />
             Screen Capture
@@ -300,7 +210,7 @@ export const ChatInterface = () => {
           <Textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder={uploadedDocument ? "Ask me to generate automation scripts based on your uploaded SOP..." : "Describe the automation workflow you need..."}
+            placeholder="Describe the automation workflow you need..."
             className="min-h-[100px] resize-none bg-card/50 backdrop-blur-sm border-border/50 focus:border-accent/50"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
