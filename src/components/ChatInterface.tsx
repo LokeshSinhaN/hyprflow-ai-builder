@@ -198,16 +198,35 @@ export const ChatInterface = () => {
       setUploadProgress(100);
 
       // Store metadata in database
-      const { error: dbError } = await supabase.from("sop_documents").insert({
-        user_id: user.id,
-        filename: file.name,
-        title: file.name.replace(".pdf", ""),
-        storage_path: fileName,
-        file_size: file.size,
-        status: "processing",
-      });
+      const { data: sopData, error: dbError } = await supabase
+        .from("sop_documents")
+        .insert({
+          user_id: user.id,
+          filename: file.name,
+          title: file.name.replace(".pdf", ""),
+          storage_path: fileName,
+          file_size: file.size,
+          status: "processing",
+        })
+        .select()
+        .single();
 
       if (dbError) throw dbError;
+
+      setUploadProgress(100);
+
+      // Trigger processing via edge function
+      const { error: processError } = await supabase.functions.invoke("process-sop", {
+        body: {
+          sopId: sopData.id,
+          storagePath: fileName,
+        },
+      });
+
+      if (processError) {
+        console.error("Processing error:", processError);
+        toast.error("SOP uploaded but processing failed. Please try again.");
+      }
 
       setTimeout(() => {
         setIsUploading(false);
