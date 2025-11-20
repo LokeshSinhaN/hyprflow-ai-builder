@@ -1,4 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+// @deno-types="https://esm.sh/v135/@types/pdf-parse@1.1.4/index.d.ts"
+import pdf from 'https://esm.sh/pdf-parse@1.1.1';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,17 +39,20 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download SOP: ${downloadError.message}`);
     }
 
-    // Convert blob to base64 for text extraction (simplified approach)
+    // Parse PDF to extract text
     const arrayBuffer = await fileData.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
+    const buffer = new Uint8Array(arrayBuffer);
     
-    // For demo: Extract basic text (in production, use proper PDF parser)
-    const text = new TextDecoder().decode(uint8Array);
+    console.log('Parsing PDF...');
+    const pdfData = await pdf(buffer);
+    const extractedText = pdfData.text;
     
-    // Sanitize and clean text
-    const cleanedText = text
-      .replace(/[^\x20-\x7E\n]/g, '') // Remove non-printable chars
-      .replace(/\s+/g, ' ')
+    console.log(`Extracted ${extractedText.length} characters from PDF`);
+    
+    // Clean and normalize text
+    const cleanedText = extractedText
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/\n+/g, '\n') // Normalize newlines
       .trim();
 
     // Chunk the text (simple approach: split by characters with overlap)
