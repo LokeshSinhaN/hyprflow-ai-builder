@@ -37,57 +37,27 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download SOP: ${downloadError.message}`);
     }
 
-    console.log('Extracting text from PDF using Gemini Vision...');
+    console.log('Extracting text from PDF using pdfjs...');
     const arrayBuffer = await fileData.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
     
-    // Convert to base64
-    let binaryString = '';
-    const base64ChunkSize = 8192;
-    for (let i = 0; i < bytes.length; i += base64ChunkSize) {
-      const chunk = bytes.slice(i, Math.min(i + base64ChunkSize, bytes.length));
-      binaryString += String.fromCharCode.apply(null, Array.from(chunk));
-    }
-    const base64Data = btoa(binaryString);
+    // Use pdfjs-dist for text extraction (Deno-compatible via esm.sh)
+    const pdfjsLib = await import('https://esm.sh/pdfjs-dist@3.11.174/build/pdf.mjs');
     
-    // Use Gemini to extract text from PDF document
-    const extractResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Extract ALL text from this PDF document. Maintain the exact structure, order, and formatting. Return ONLY the extracted text without any commentary, explanations, or metadata. Include all steps, instructions, and details exactly as they appear.'
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:application/pdf;base64,${base64Data}`
-                }
-              }
-            ]
-          }
-        ],
-        max_tokens: 16000,
-      }),
-    });
-
-    if (!extractResponse.ok) {
-      const errorText = await extractResponse.text();
-      console.error('Gemini Vision extraction failed:', errorText);
-      throw new Error(`PDF text extraction failed: ${errorText}`);
+    // Load the PDF document
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDoc = await loadingTask.promise;
+    
+    let extractedText = '';
+    
+    // Extract text from each page
+    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      extractedText += pageText + '\n\n';
     }
-
-    const extractData = await extractResponse.json();
-    const extractedText = extractData.choices?.[0]?.message?.content || '';
     
     if (!extractedText || extractedText.length < 50) {
       throw new Error('Failed to extract meaningful text from PDF');
