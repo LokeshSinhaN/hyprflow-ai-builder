@@ -1,6 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
-// @deno-types="https://esm.sh/v135/@types/pdf-parse@1.1.4/index.d.ts"
-import pdf from 'https://esm.sh/pdf-parse@1.1.1';
+import { getDocument } from 'https://esm.sh/pdfjs-dist@3.11.174/legacy/build/pdf.mjs';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,13 +38,30 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download SOP: ${downloadError.message}`);
     }
 
-    // Parse PDF to extract text
+    // Parse PDF to extract text using PDF.js
+    console.log('Parsing PDF with PDF.js...');
     const arrayBuffer = await fileData.arrayBuffer();
-    const buffer = new Uint8Array(arrayBuffer);
     
-    console.log('Parsing PDF...');
-    const pdfData = await pdf(buffer);
-    const extractedText = pdfData.text;
+    // Load the PDF document
+    const loadingTask = getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+    });
+    
+    const pdfDocument = await loadingTask.promise;
+    const numPages = pdfDocument.numPages;
+    console.log(`PDF has ${numPages} pages`);
+    
+    // Extract text from all pages
+    let extractedText = '';
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      const page = await pdfDocument.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      extractedText += pageText + '\n';
+    }
     
     console.log(`Extracted ${extractedText.length} characters from PDF`);
     
@@ -166,7 +182,7 @@ Deno.serve(async (req) => {
       .from('sop_documents')
       .update({
         status: 'indexed',
-        page_count: 1, // Simplified for demo
+        page_count: numPages,
         content: cleanedText.substring(0, 10000), // Store sample
       })
       .eq('id', sopId);
