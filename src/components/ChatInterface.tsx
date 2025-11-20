@@ -18,6 +18,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
@@ -34,7 +44,8 @@ export const ChatInterface = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
-  const [uploadedSops, setUploadedSops] = useState<Array<{ id: string; filename: string; status: string }>>([]);
+  const [uploadedSops, setUploadedSops] = useState<Array<{ id: string; filename: string; status: string; storage_path: string | null }>>([]);
+  const [deletingSopId, setDeletingSopId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
@@ -55,7 +66,7 @@ export const ChatInterface = () => {
 
     const { data, error } = await supabase
       .from("sop_documents")
-      .select("id, filename, status")
+      .select("id, filename, status, storage_path")
       .eq("user_id", user.id)
       .eq("status", "indexed")
       .order("created_at", { ascending: false });
@@ -171,6 +182,62 @@ export const ChatInterface = () => {
       // Save assistant message with code
       await saveMessage("assistant", assistantMessage.content, script);
     }, 800);
+  };
+
+  const handleDeleteSop = async (sopId: string, storagePath: string) => {
+    try {
+      // Delete from Qdrant
+      const qdrantUrl = import.meta.env.VITE_QDRANT_URL;
+      const qdrantApiKey = import.meta.env.VITE_QDRANT_API_KEY;
+
+      // Get chunk IDs from database
+      const { data: chunks } = await supabase
+        .from('sop_chunks')
+        .select('qdrant_point_id')
+        .eq('sop_id', sopId);
+
+      if (chunks && chunks.length > 0 && qdrantUrl && qdrantApiKey) {
+        const pointIds = chunks.map(c => c.qdrant_point_id);
+        
+        await fetch(`${qdrantUrl}/collections/sop_chunks/points/delete`, {
+          method: 'POST',
+          headers: {
+            'api-key': qdrantApiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ points: pointIds }),
+        });
+      }
+
+      // Delete chunks from database
+      await supabase
+        .from('sop_chunks')
+        .delete()
+        .eq('sop_id', sopId);
+
+      // Delete from storage
+      if (storagePath) {
+        await supabase.storage
+          .from('sop-documents')
+          .remove([storagePath]);
+      }
+
+      // Delete document record
+      const { error } = await supabase
+        .from('sop_documents')
+        .delete()
+        .eq('id', sopId);
+
+      if (error) throw error;
+
+      toast.success("SOP document deleted successfully");
+      loadUploadedSops();
+      setDeletingSopId(null);
+    } catch (error) {
+      console.error('Error deleting SOP:', error);
+      toast.error("Failed to delete SOP document");
+      setDeletingSopId(null);
+    }
   };
 
   const handleUpload = () => {
@@ -345,10 +412,18 @@ export const ChatInterface = () => {
               {uploadedSops.map((sop) => (
                 <div
                   key={sop.id}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/10 border border-accent/20"
+                  className="group flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/10 border border-accent/20 hover:bg-accent/20 transition-colors"
                 >
-                  <FileText className="w-3.5 h-3.5 text-accent" />
-                  <span className="text-xs font-medium">{sop.filename}</span>
+                  <FileText className="w-3.5 h-3.5 text-accent flex-shrink-0" />
+                  <span className="text-xs font-medium truncate max-w-[200px]">{sop.filename}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 w-5 p-0 ml-1 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setDeletingSopId(sop.id)}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               ))}
             </div>
@@ -404,8 +479,33 @@ export const ChatInterface = () => {
           <Button variant="premium" size="icon" onClick={handleSend} className="h-[100px] w-12">
             <Send className="w-5 h-5" />
           </Button>
-        </div>
       </div>
+
+      <AlertDialog open={!!deletingSopId} onOpenChange={() => setDeletingSopId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete SOP Document</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this SOP? This will remove the document from storage, the database, and the vector database. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const sop = uploadedSops.find(s => s.id === deletingSopId);
+                if (sop) {
+                  handleDeleteSop(sop.id, sop.storage_path);
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
 
       {/* Right Panel - Code Viewer */}
       <div className="flex-1">
