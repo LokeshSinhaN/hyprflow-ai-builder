@@ -37,20 +37,31 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download SOP: ${downloadError.message}`);
     }
 
-    console.log('Extracting text from PDF...');
+    console.log('Extracting text from PDF using pdfjs-serverless...');
     const arrayBuffer = await fileData.arrayBuffer();
-    const buffer = new Uint8Array(arrayBuffer);
     
-    // Use pdf-parse via esm.sh
-    const pdfParse = (await import('https://esm.sh/pdf-parse@1.1.1')).default;
-    const pdfData = await pdfParse(buffer);
-    const extractedText = pdfData.text;
+    // Use pdfjs-serverless which is Deno-compatible
+    const { getDocument } = await import('https://esm.sh/pdfjs-serverless@0.3.2');
+    const data = new Uint8Array(arrayBuffer);
+    const doc = await getDocument(data).promise;
+    
+    let extractedText = '';
+    
+    // Extract text from all pages
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item: any) => item.str)
+        .join(' ');
+      extractedText += pageText + '\n\n';
+    }
     
     if (!extractedText || extractedText.length < 50) {
       throw new Error('Failed to extract meaningful text from PDF');
     }
     
-    console.log(`Extracted ${extractedText.length} characters from PDF`);
+    console.log(`Extracted ${extractedText.length} characters from ${doc.numPages} pages`);
     
     // Clean and normalize text
     const cleanedText = extractedText
