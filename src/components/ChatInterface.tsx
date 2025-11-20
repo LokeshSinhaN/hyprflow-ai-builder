@@ -58,6 +58,10 @@ export const ChatInterface = () => {
   useEffect(() => {
     if (user) {
       loadUploadedSops();
+      
+      // Poll for updated SOPs every 5 seconds
+      const interval = setInterval(loadUploadedSops, 5000);
+      return () => clearInterval(interval);
     }
   }, [user]);
 
@@ -157,31 +161,46 @@ export const ChatInterface = () => {
   };
 
   const handleSend = async () => {
-    if (!message.trim() || !currentConversationId) return;
+    if (!message.trim() || !currentConversationId || !user) return;
 
     const userMessage = message;
+    setMessage("");
+
     const newMessages = [...messages, { role: "user" as const, content: userMessage }];
     setMessages(newMessages);
-    setMessage("");
 
     // Save user message
     await saveMessage("user", userMessage);
 
-    // Generate Python script
-    setTimeout(async () => {
-      const script = generatePythonScript(userMessage);
-      setGeneratedCode(script);
+    try {
+      // Call generate-script-rag edge function
+      const { data, error } = await supabase.functions.invoke('generate-script-rag', {
+        body: { 
+          message: userMessage,
+          conversationId: currentConversationId 
+        }
+      });
+
+      if (error) throw error;
+
+      const { scripts, chunksUsed } = data;
+      setGeneratedCode(scripts);
 
       const assistantMessage = {
         role: "assistant" as const,
-        content: "I've generated a Python script for your automation workflow. Check the code panel on the right to view, copy, or download it!",
+        content: chunksUsed > 0
+          ? `I've generated Python and Playwright automation scripts using ${chunksUsed} relevant sections from your uploaded SOPs. Both scripts are ready to use!`
+          : `I've generated Python and Playwright automation scripts for your workflow. Both scripts are ready to use!`,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
 
       // Save assistant message with code
-      await saveMessage("assistant", assistantMessage.content, script);
-    }, 800);
+      await saveMessage("assistant", assistantMessage.content, scripts);
+    } catch (error) {
+      console.error("Error generating script:", error);
+      toast.error("Failed to generate script. Please try again.");
+    }
   };
 
   const handleDeleteSop = async (sopId: string, storagePath: string) => {
