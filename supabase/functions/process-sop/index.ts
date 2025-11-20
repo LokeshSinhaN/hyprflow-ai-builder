@@ -39,7 +39,19 @@ Deno.serve(async (req) => {
 
     console.log('Extracting text from PDF using Gemini...');
     const arrayBuffer = await fileData.arrayBuffer();
-    const base64Pdf = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    
+    // Convert to base64 in chunks to avoid stack overflow
+    const bytes = new Uint8Array(arrayBuffer);
+    const base64ChunkSize = 8192;
+    let base64Pdf = '';
+    
+    for (let i = 0; i < bytes.length; i += base64ChunkSize) {
+      const chunk = bytes.slice(i, i + base64ChunkSize);
+      base64Pdf += String.fromCharCode(...chunk);
+    }
+    base64Pdf = btoa(base64Pdf);
+    
+    console.log(`PDF converted to base64, size: ${base64Pdf.length} characters`);
     
     // Use Gemini to extract text from PDF
     const extractResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
