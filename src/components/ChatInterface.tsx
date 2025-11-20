@@ -32,8 +32,6 @@ export const ChatInterface = () => {
   ]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
-  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
-  const [uploadedFileName, setUploadedFileName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
@@ -171,7 +169,6 @@ export const ChatInterface = () => {
 
     setIsUploading(true);
     setUploadProgress(0);
-    setUploadedFileName(file.name);
 
     try {
       // Simulate upload progress
@@ -231,7 +228,7 @@ export const ChatInterface = () => {
       setTimeout(() => {
         setIsUploading(false);
         setUploadProgress(0);
-        setShowSuccessDialog(true);
+        toast.success("SOP uploaded and processing started");
       }, 500);
     } catch (error) {
       console.error("Upload error:", error);
@@ -294,7 +291,7 @@ export const ChatInterface = () => {
           <Card className="p-4 bg-card/80 backdrop-blur-sm border-accent/30">
             <div className="flex items-center gap-3 mb-2">
               <FileText className="w-5 h-5 text-accent animate-pulse" />
-              <span className="text-sm font-medium">Uploading {uploadedFileName}...</span>
+              <span className="text-sm font-medium">Uploading SOP...</span>
             </div>
             <Progress value={uploadProgress} className="h-2" />
             <p className="text-xs text-muted-foreground mt-2">{uploadProgress}% complete</p>
@@ -368,30 +365,6 @@ export const ChatInterface = () => {
         )}
       </div>
 
-      {/* Success Dialog */}
-      <Dialog open={showSuccessDialog} onOpenChange={setShowSuccessDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-full bg-gradient-primary">
-                <FileText className="w-6 h-6 text-accent-foreground" />
-              </div>
-              <DialogTitle>SOP Uploaded Successfully!</DialogTitle>
-            </div>
-            <DialogDescription className="pt-4">
-              <span className="font-medium text-foreground">{uploadedFileName}</span> has been uploaded and is being processed.
-              You can now use this SOP to generate automation scripts.
-            </DialogDescription>
-          </DialogHeader>
-          <Button 
-            onClick={() => setShowSuccessDialog(false)}
-            className="w-full"
-            variant="default"
-          >
-            Got it
-          </Button>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
