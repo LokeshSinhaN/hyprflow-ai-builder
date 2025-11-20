@@ -37,12 +37,11 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download SOP: ${downloadError.message}`);
     }
 
-    console.log('Extracting text from PDF...');
+    console.log('Extracting text from PDF using Gemini Vision...');
     const arrayBuffer = await fileData.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
     
-    
-    // Convert first to binary string in chunks
+    // Convert to base64
     let binaryString = '';
     const base64ChunkSize = 8192;
     for (let i = 0; i < bytes.length; i += base64ChunkSize) {
@@ -51,9 +50,7 @@ Deno.serve(async (req) => {
     }
     const base64Data = btoa(binaryString);
     
-    console.log('Using AI to extract text from PDF...');
-    
-    // First, convert PDF pages to images and extract text using vision
+    // Use Gemini to extract text from PDF document
     const extractResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -65,32 +62,38 @@ Deno.serve(async (req) => {
         messages: [
           {
             role: 'user',
-            content: `I have a PDF workflow document. Please extract ALL the text content from it, maintaining the structure and order. Return only the extracted text without any additional commentary.`
+            content: [
+              {
+                type: 'text',
+                text: 'Extract ALL text from this PDF document. Maintain the exact structure, order, and formatting. Return ONLY the extracted text without any commentary, explanations, or metadata. Include all steps, instructions, and details exactly as they appear.'
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:application/pdf;base64,${base64Data}`
+                }
+              }
+            ]
           }
         ],
-        max_tokens: 8000,
+        max_tokens: 16000,
       }),
     });
 
     if (!extractResponse.ok) {
       const errorText = await extractResponse.text();
-      console.error('AI extraction failed:', errorText);
-      throw new Error(`Text extraction failed: ${errorText}`);
+      console.error('Gemini Vision extraction failed:', errorText);
+      throw new Error(`PDF text extraction failed: ${errorText}`);
     }
 
     const extractData = await extractResponse.json();
+    const extractedText = extractData.choices?.[0]?.message?.content || '';
     
-    // For now, use a simplified extraction approach
-    // In production, you'd want to use a proper PDF library or convert to images first
-    let extractedText = `[PDF Content from ${storagePath}]\n\n`;
-    extractedText += 'This is a workflow document that has been uploaded for processing.\n';
-    extractedText += 'Note: Full PDF text extraction is being processed. This is placeholder content.\n\n';
+    if (!extractedText || extractedText.length < 50) {
+      throw new Error('Failed to extract meaningful text from PDF');
+    }
     
-    // Add some metadata
-    extractedText += `File size: ${bytes.length} bytes\n`;
-    extractedText += `Uploaded: ${new Date().toISOString()}\n`;
-    
-    console.log(`Generated placeholder text: ${extractedText.length} characters`);
+    console.log(`Extracted ${extractedText.length} characters from PDF`);
     
     // Clean and normalize text
     const cleanedText = extractedText
@@ -98,10 +101,10 @@ Deno.serve(async (req) => {
       .replace(/\n+/g, '\n') // Normalize newlines
       .trim();
 
-    // Chunk the text (simple approach: split by characters with overlap)
+    // Chunk the text with smaller chunks for better context retrieval
     const chunks: string[] = [];
-    const chunkSize = 3000;
-    const overlap = 300;
+    const chunkSize = 150;
+    const overlap = 50;
     
     for (let i = 0; i < cleanedText.length; i += chunkSize - overlap) {
       const chunk = cleanedText.substring(i, i + chunkSize);
@@ -167,7 +170,7 @@ Deno.serve(async (req) => {
         payload: {
           sop_id: sopId,
           chunk_index: index,
-          content: chunk.substring(0, 500), // Store preview
+          content: chunk, // Store full chunk for context
         },
       };
     });
