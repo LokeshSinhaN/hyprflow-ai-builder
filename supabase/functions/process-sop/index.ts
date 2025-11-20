@@ -111,7 +111,8 @@ Deno.serve(async (req) => {
 
     // Store points in Qdrant and chunk metadata in Supabase
     const points = chunks.map((chunk, index) => {
-      const pointId = `${sopId}_${index}`;
+      // Generate a proper UUID for Qdrant point ID
+      const pointId = crypto.randomUUID();
       return {
         id: pointId,
         vector: embeddings[index],
@@ -143,7 +144,7 @@ Deno.serve(async (req) => {
       sop_id: sopId,
       chunk_index: index,
       content: chunk,
-      qdrant_point_id: `${sopId}_${index}`,
+      qdrant_point_id: points[index].id, // Use the same UUID as Qdrant
       token_count: Math.ceil(chunk.length / 4), // Rough estimate
     }));
 
