@@ -37,27 +37,14 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download SOP: ${downloadError.message}`);
     }
 
-    console.log('Extracting text from PDF using pdfjs...');
+    console.log('Extracting text from PDF...');
     const arrayBuffer = await fileData.arrayBuffer();
+    const buffer = new Uint8Array(arrayBuffer);
     
-    // Use pdfjs-dist for text extraction (Deno-compatible via esm.sh)
-    const pdfjsLib = await import('https://esm.sh/pdfjs-dist@3.11.174/build/pdf.mjs');
-    
-    // Load the PDF document
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-    const pdfDoc = await loadingTask.promise;
-    
-    let extractedText = '';
-    
-    // Extract text from each page
-    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-      const page = await pdfDoc.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => item.str)
-        .join(' ');
-      extractedText += pageText + '\n\n';
-    }
+    // Use pdf-parse via esm.sh
+    const pdfParse = (await import('https://esm.sh/pdf-parse@1.1.1')).default;
+    const pdfData = await pdfParse(buffer);
+    const extractedText = pdfData.text;
     
     if (!extractedText || extractedText.length < 50) {
       throw new Error('Failed to extract meaningful text from PDF');
