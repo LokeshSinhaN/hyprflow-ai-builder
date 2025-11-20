@@ -1,4 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+// Import PDF.js for text extraction
+import * as pdfjsLib from 'https://esm.sh/pdfjs-dist@4.0.379/build/pdf.min.mjs';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,60 +39,34 @@ Deno.serve(async (req) => {
       throw new Error(`Failed to download SOP: ${downloadError.message}`);
     }
 
-    console.log('Extracting text from PDF using Gemini...');
+    console.log('Extracting text from PDF using PDF.js...');
     const arrayBuffer = await fileData.arrayBuffer();
     
-    // Convert to base64 in chunks to avoid stack overflow
-    const bytes = new Uint8Array(arrayBuffer);
-    const base64ChunkSize = 8192;
-    let base64Pdf = '';
-    
-    for (let i = 0; i < bytes.length; i += base64ChunkSize) {
-      const chunk = bytes.slice(i, i + base64ChunkSize);
-      base64Pdf += String.fromCharCode(...chunk);
-    }
-    base64Pdf = btoa(base64Pdf);
-    
-    console.log(`PDF converted to base64, size: ${base64Pdf.length} characters`);
-    
-    // Use Gemini to extract text from PDF
-    const extractResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Extract all text content from this PDF document. Return only the extracted text, preserving structure and formatting as much as possible.'
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:application/pdf;base64,${base64Pdf}`
-                }
-              }
-            ]
-          }
-        ],
-        max_tokens: 4000,
-      }),
+    // Load PDF document
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+      standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/standard_fonts/',
     });
-
-    if (!extractResponse.ok) {
-      throw new Error(`Text extraction failed: ${await extractResponse.text()}`);
-    }
-
-    const extractData = await extractResponse.json();
-    const extractedText = extractData.choices[0].message.content;
     
-    console.log(`Extracted ${extractedText.length} characters from PDF`);
+    const pdf = await loadingTask.promise;
+    console.log(`PDF loaded with ${pdf.numPages} pages`);
+    
+    // Extract text from all pages
+    let extractedText = '';
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      
+      // Combine text items with spaces
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      
+      extractedText += pageText + '\n\n';
+    }
+    
+    console.log(`Extracted ${extractedText.length} characters from ${pdf.numPages} pages`);
     
     // Clean and normalize text
     const cleanedText = extractedText
@@ -209,7 +185,7 @@ Deno.serve(async (req) => {
       .from('sop_documents')
       .update({
         status: 'indexed',
-        page_count: Math.ceil(extractedText.length / 3000), // Estimate pages
+        page_count: pdf.numPages,
         content: cleanedText.substring(0, 10000), // Store sample
       })
       .eq('id', sopId);
