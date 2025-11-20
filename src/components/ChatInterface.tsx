@@ -32,6 +32,9 @@ export const ChatInterface = () => {
   ]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [uploadedSops, setUploadedSops] = useState<Array<{ id: string; filename: string; status: string }>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
@@ -40,6 +43,27 @@ export const ChatInterface = () => {
       createNewConversation();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      loadUploadedSops();
+    }
+  }, [user]);
+
+  const loadUploadedSops = async () => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("sop_documents")
+      .select("id, filename, status")
+      .eq("user_id", user.id)
+      .eq("status", "indexed")
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      setUploadedSops(data);
+    }
+  };
 
   const createNewConversation = async () => {
     if (!user) return;
@@ -295,6 +319,39 @@ export const ChatInterface = () => {
             </div>
             <Progress value={uploadProgress} className="h-2" />
             <p className="text-xs text-muted-foreground mt-2">{uploadProgress}% complete</p>
+          </Card>
+        )}
+
+        {/* Processing Progress Bar */}
+        {isProcessing && (
+          <Card className="p-4 bg-card/80 backdrop-blur-sm border-accent/30">
+            <div className="flex items-center gap-3 mb-2">
+              <FileText className="w-5 h-5 text-accent animate-spin" />
+              <span className="text-sm font-medium">Processing SOP in Qdrant...</span>
+            </div>
+            <Progress value={processingProgress} className="h-2" />
+            <p className="text-xs text-muted-foreground mt-2">{processingProgress}% complete</p>
+          </Card>
+        )}
+
+        {/* Uploaded SOPs */}
+        {uploadedSops.length > 0 && (
+          <Card className="p-3 bg-card/60 backdrop-blur-sm border-border/50">
+            <div className="flex items-center gap-2 mb-2">
+              <FileText className="w-4 h-4 text-accent" />
+              <span className="text-xs font-medium text-muted-foreground">Uploaded SOPs:</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {uploadedSops.map((sop) => (
+                <div
+                  key={sop.id}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-accent/10 border border-accent/20"
+                >
+                  <FileText className="w-3.5 h-3.5 text-accent" />
+                  <span className="text-xs font-medium">{sop.filename}</span>
+                </div>
+              ))}
+            </div>
           </Card>
         )}
 
