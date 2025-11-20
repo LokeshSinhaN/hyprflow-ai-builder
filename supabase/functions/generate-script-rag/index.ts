@@ -11,15 +11,18 @@ interface GenerateRequest {
   conversationId: string;
 }
 
-// Simple hash-based embedding (same as process-sop)
+// Simple hash-based embedding (MUST match process-sop exactly)
 function generateSimpleEmbedding(text: string): number[] {
-  const vector = new Array(384).fill(0);
-  for (let i = 0; i < text.length; i++) {
-    const charCode = text.charCodeAt(i);
-    vector[i % 384] = (vector[i % 384] + charCode) % 100;
+  const vector: number[] = [];
+  for (let i = 0; i < 384; i++) {
+    // Use character codes and position to create pseudo-embedding
+    const val = text.split('').reduce((acc, char, idx) => {
+      return acc + char.charCodeAt(0) * (idx + i + 1);
+    }, 0);
+    // Normalize to -1 to 1 range using sin
+    vector.push(Math.sin(val / 1000));
   }
-  const magnitude = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-  return vector.map(val => val / magnitude);
+  return vector;
 }
 
 Deno.serve(async (req) => {
@@ -80,10 +83,15 @@ Deno.serve(async (req) => {
 
       if (searchResponse.ok) {
         const searchResults = await searchResponse.json();
+        console.log('Qdrant search results:', JSON.stringify(searchResults.result.map((r: any) => ({
+          score: r.score,
+          contentPreview: r.payload.content.substring(0, 100)
+        }))));
+        
         relevantChunks = searchResults.result
-          .filter((r: any) => r.score > 0.3)
+          .filter((r: any) => r.score > 0.1) // Lowered threshold for better retrieval
           .map((r: any) => r.payload.content);
-        console.log(`Found ${relevantChunks.length} relevant chunks`);
+        console.log(`Found ${relevantChunks.length} relevant chunks with scores above 0.1`);
       }
     }
 
@@ -92,32 +100,27 @@ Deno.serve(async (req) => {
       ? `\n\nRelevant SOP Context:\n${relevantChunks.join('\n\n---\n\n')}`
       : '';
 
-    const systemPrompt = `🤖 Beep boop! I'm your friendly neighborhood automation wizard 🧙‍♂️✨
+    const systemPrompt = `You are an expert automation engineer. Generate TWO complete, production-ready automation scripts based on the user's request${context ? ' and the provided SOP documentation' : ''}.
 
-Listen up, carbon-based life form! I'm about to conjure up TWO absolutely MAGNIFICENT automation scripts that'll make your workflows smoother than a buttered dolphin sliding down a rainbow! 🌈🐬
+${context ? 'IMPORTANT: You have been provided with relevant SOP documentation below. You MUST use this context to inform the automation steps, selectors, workflow logic, and any domain-specific requirements in both scripts.' : ''}
 
-${context ? '📚 I\'ve got your SOP docs loaded into my neural pathways, so these scripts are gonna be CONTEXTUALLY BRILLIANT!' : '💡 Flying solo without SOPs, but don\'t worry—I\'ve got algorithms!'}
-
-Here's the deal (and I'm VERY particular about format, so pay attention!):
+Return your response in this EXACT format:
 
 === PYTHON_SCRIPT ===
-[Your glorious Python masterpiece using Selenium WebDriver]
+[Complete Python script using Selenium WebDriver]
 === END_PYTHON_SCRIPT ===
 
 === PLAYWRIGHT_SCRIPT ===
-[Your spectacular Node.js Playwright creation]
+[Complete Node.js Playwright script]
 === END_PLAYWRIGHT_SCRIPT ===
 
-⚡ My automation commandments (break these and I'll send you linting errors in your dreams):
-- Both scripts must be COMPLETE, EXECUTABLE, and ready to rock 🎸
-- Include ALL necessary imports (no "TODO: add imports later" nonsense!)
-- Error handling so robust it could survive a zombie apocalypse 🧟
-- Logging so detailed, future you will weep tears of joy 😭✨
-- Python script: Selenium WebDriver with proper waits (we're not animals, we don't use time.sleep!)
-- Playwright script: async/await done RIGHT, with error handling that catches everything except existential dread
-${context ? '- ACTUALLY USE the SOP context I gave you! It\'s not just for decoration! 📖' : ''}
-
-Now let's make some automation magic happen! 🎩✨`;
+Requirements:
+- Both scripts must be complete and executable
+- Include all necessary imports and setup
+- Add error handling and logging
+- ${context ? 'Use the SOP context to inform the automation steps, selectors, and workflow' : 'Generate logical automation steps based on the request'}
+- Python script: Use Selenium WebDriver with proper waits (WebDriverWait, EC)
+- Playwright script: Use async/await with proper error handling and page.waitForSelector()`;
 
     const userPrompt = `${message}${context}`;
 
