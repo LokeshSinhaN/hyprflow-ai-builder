@@ -11,20 +11,6 @@ interface GenerateRequest {
   conversationId: string;
 }
 
-// Simple hash-based embedding (MUST match process-sop exactly)
-function generateSimpleEmbedding(text: string): number[] {
-  const vector: number[] = [];
-  for (let i = 0; i < 384; i++) {
-    // Use character codes and position to create pseudo-embedding
-    const val = text.split('').reduce((acc, char, idx) => {
-      return acc + char.charCodeAt(0) * (idx + i + 1);
-    }, 0);
-    // Normalize to -1 to 1 range using sin
-    vector.push(Math.sin(val / 1000));
-  }
-  return vector;
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -59,52 +45,96 @@ Deno.serve(async (req) => {
       .eq('user_id', conversation.user_id)
       .eq('status', 'indexed');
 
-    // Generate query embedding
-    const queryEmbedding = generateSimpleEmbedding(message);
-
-    // Search Qdrant for relevant chunks
-    let relevantChunks: string[] = [];
+    // Retrieve ALL chunks from user's SOPs (no semantic search)
+    let allChunks: string[] = [];
     
     if (sops && sops.length > 0) {
-      console.log(`Searching ${sops.length} SOPs in Qdrant...`);
+      console.log(`Retrieving ALL chunks from ${sops.length} SOPs...`);
       
-      const searchResponse = await fetch(`${qdrantUrl}/collections/sop_chunks/points/search`, {
+      // Fetch ALL points from Qdrant that belong to user's SOPs
+      const sopIds = sops.map(sop => sop.id);
+      
+      const scrollResponse = await fetch(`${qdrantUrl}/collections/sop_chunks/points/scroll`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'api-key': qdrantApiKey,
         },
         body: JSON.stringify({
-          vector: queryEmbedding,
-          limit: 5,
+          filter: {
+            must: [
+              {
+                key: "sop_id",
+                match: { any: sopIds }
+              }
+            ]
+          },
+          limit: 1000, // Adjust based on expected chunk count
           with_payload: true,
+          with_vector: false, // Don't need vectors, just content
         }),
       });
 
-      if (searchResponse.ok) {
-        const searchResults = await searchResponse.json();
-        console.log('Qdrant search results:', JSON.stringify(searchResults.result.map((r: any) => ({
-          score: r.score,
-          contentPreview: r.payload.content.substring(0, 100)
-        }))));
+      if (scrollResponse.ok) {
+        const scrollResults = await scrollResponse.json();
         
-        relevantChunks = searchResults.result
-          .filter((r: any) => r.score > 0.1) // Lowered threshold for better retrieval
-          .map((r: any) => r.payload.content);
-        console.log(`Found ${relevantChunks.length} relevant chunks with scores above 0.1`);
+        // Sort chunks by chunk_index to preserve original order
+        const sortedPoints = scrollResults.result.points.sort((a: any, b: any) => {
+          return a.payload.chunk_index - b.payload.chunk_index;
+        });
+        
+        allChunks = sortedPoints.map((point: any) => point.payload.content);
+        
+        console.log(`Retrieved ${allChunks.length} chunks in original document order`);
+      } else {
+        console.error('Failed to retrieve chunks from Qdrant:', await scrollResponse.text());
       }
     }
 
-    // Construct enhanced prompt with context
-    const context = relevantChunks.length > 0
-      ? `\n\nRelevant SOP Context:\n${relevantChunks.join('\n\n---\n\n')}`
+    // Construct complete document context from ALL chunks
+    const context = allChunks.length > 0
+      ? `\n\n=== COMPLETE SOP DOCUMENT (ALL CHUNKS) ===\n${allChunks.join('\n')}\n=== END OF SOP DOCUMENT ===\n`
       : '';
 
-    const systemPrompt = `You are an expert automation engineer. Generate TWO complete, production-ready automation scripts based on the user's request${context ? ' and the provided SOP documentation' : ''}.
+    const systemPrompt = `You are an Automation Script Generator. Your ONLY source of truth is the SOP document chunks provided below.
 
-${context ? 'IMPORTANT: You have been provided with relevant SOP documentation below. You MUST use this context to inform the automation steps, selectors, workflow logic, and any domain-specific requirements in both scripts.' : ''}
+=== BEHAVIORAL RULES ===
 
-Return your response in this EXACT format:
+1. **DO NOT** perform semantic search, cosine similarity, ranking, or any retrieval algorithm.
+2. **ASSUME** all provided chunks are already relevant and must be fully consumed.
+3. **TREAT** all chunks as the authoritative requirement document.
+4. **READ** and understand all chunks in full. These chunks contain:
+   - Step-by-step procedures
+   - Instructions and workflow logic
+   - Conditions and business rules
+   - UI element descriptions
+   - Web automation requirements
+
+5. **GENERATE** two complete, production-ready scripts upon request:
+   - Python script (using Selenium WebDriver for browser automation)
+   - Playwright script (JavaScript/TypeScript, preserving all logic and steps)
+
+6. **FOLLOW** these script generation rules:
+   - Use correct automation flow based on ALL chunks
+   - Include ALL steps present in the chunks
+   - Maintain accurate sequencing and branching
+   - NO hallucination beyond provided requirements
+   - Add proper error handling and logging
+   - Include all necessary imports and setup
+
+7. **FOR SCRIPT EDITING:** When user requests modifications:
+   - Only modify what the user requests
+   - Do NOT alter unrelated logic
+   - Maintain consistency between steps and automation flow
+   - Never re-hallucinate steps not in chunks unless explicitly requested
+
+8. **IF INFORMATION IS MISSING:**
+   - If chunks are missing: "The provided documents do not contain information for that. Please upload or provide the relevant steps."
+   - If user asks something outside chunks: "The provided documents do not contain information for that. Please upload or provide the relevant steps."
+
+=== OUTPUT FORMAT ===
+
+You MUST return your response in this EXACT format:
 
 === PYTHON_SCRIPT ===
 [Complete Python script using Selenium WebDriver]
@@ -114,17 +144,13 @@ Return your response in this EXACT format:
 [Complete Node.js Playwright script]
 === END_PLAYWRIGHT_SCRIPT ===
 
-Requirements:
-- Both scripts must be complete and executable
-- Include all necessary imports and setup
-- Add error handling and logging
-- ${context ? 'Use the SOP context to inform the automation steps, selectors, and workflow' : 'Generate logical automation steps based on the request'}
-- Python script: Use Selenium WebDriver with proper waits (WebDriverWait, EC)
-- Playwright script: Use async/await with proper error handling and page.waitForSelector()`;
+${context ? '\n=== YOUR AUTHORITATIVE SOURCE ===\nThe complete SOP document is provided below. You MUST consume and use ALL of it.\n' : '\n=== NO SOP DOCUMENT PROVIDED ===\nNo SOP has been uploaded. Inform the user to upload an SOP first.\n'}`;
 
-    const userPrompt = `${message}${context}`;
+    const userPrompt = context 
+      ? `User Request: ${message}\n\n${context}`
+      : `User Request: ${message}\n\nNOTE: No SOP document is available. Please ask the user to upload an SOP first.`;
 
-    console.log('Calling Gemini 2.5 Pro for maximum RAG accuracy...');
+    console.log(`Calling Gemini 2.5 Pro with ALL ${allChunks.length} chunks (no filtering)...`);
     
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -157,7 +183,8 @@ Requirements:
     return new Response(
       JSON.stringify({ 
         scripts: generatedContent,
-        chunksUsed: relevantChunks.length 
+        totalChunksUsed: allChunks.length,
+        sopCount: sops?.length || 0,
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
