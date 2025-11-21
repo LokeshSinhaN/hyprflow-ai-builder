@@ -54,37 +54,29 @@ Deno.serve(async (req) => {
       
       // Ensure Qdrant collection has the sop_id index
       const collectionName = 'sop_chunks';
-      const collectionInfoResponse = await fetch(`${qdrantUrl}/collections/${collectionName}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'api-key': qdrantApiKey,
-        },
-      });
+      
+      try {
+        // Create field index using the proper Qdrant API endpoint
+        const indexResponse = await fetch(`${qdrantUrl}/collections/${collectionName}/index`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': qdrantApiKey,
+          },
+          body: JSON.stringify({
+            field_name: 'sop_id',
+            field_schema: 'keyword'
+          }),
+        });
 
-      if (collectionInfoResponse.ok) {
-        const collectionInfo = await collectionInfoResponse.json();
-        const hasIndex = collectionInfo.result?.payload_schema?.sop_id?.index === true;
-        
-        if (!hasIndex) {
-          console.log('Adding sop_id index to existing collection...');
-          await fetch(`${qdrantUrl}/collections/${collectionName}`, {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              'api-key': qdrantApiKey,
-            },
-            body: JSON.stringify({
-              payload_schema: {
-                sop_id: {
-                  data_type: 'keyword',
-                  index: true,
-                },
-              },
-            }),
-          });
-          console.log('Index added successfully');
+        if (indexResponse.ok) {
+          console.log('Created or updated sop_id index');
+        } else {
+          const errorText = await indexResponse.text();
+          console.log('Index creation response:', errorText);
         }
+      } catch (indexError) {
+        console.error('Error creating index:', indexError);
       }
       
       // Fetch ALL points from Qdrant that belong to user's SOPs
