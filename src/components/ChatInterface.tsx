@@ -212,18 +212,18 @@ export const ChatInterface = () => {
         scriptDescription = 'Python and Playwright';
       }
 
-      // Healthcare facts for newbies to US healthcare
+      // Healthcare RCM facts focused on revenue cycle management and processes
       const healthcareFacts = [
-        "💡 Did you know? In the US, most people get health insurance through their employer, covering about 49% of Americans.",
-        "💡 Healthcare tip: A Primary Care Physician (PCP) is your main doctor who coordinates all your healthcare needs.",
-        "💡 Quick fact: The US healthcare system uses CPT codes to bill for medical procedures - there are over 10,000 different codes!",
-        "💡 Insurance insight: A deductible is the amount you pay before your insurance starts covering costs.",
-        "💡 Good to know: An HMO requires you to choose a primary care doctor and get referrals for specialists.",
-        "💡 Healthcare 101: Co-pay is the fixed amount you pay for each doctor visit or prescription, usually between $10-$50.",
-        "💡 Pro tip: Out-of-network providers cost significantly more than in-network ones - always check first!",
-        "💡 Important: HIPAA laws protect your medical information privacy and give you rights over your health data.",
-        "💡 FYI: Open enrollment is the annual period when you can sign up for or change your health insurance plan.",
-        "💡 Key term: EOB (Explanation of Benefits) shows what your insurance covered and what you owe - not a bill!",
+        "💡 RCM Insight: Revenue Cycle Management (RCM) tracks patient care from registration through final payment collection.",
+        "💡 Eligibility Check: Verifying insurance eligibility before service prevents claim denials and ensures accurate billing.",
+        "💡 Claim Management: Clean claim rate (claims submitted without errors) should be above 95% for optimal RCM performance.",
+        "💡 AR Management: Accounts Receivable (AR) aging should be monitored regularly - aim to collect 90% of AR within 90 days.",
+        "💡 Prior Authorization: Many procedures require pre-approval from insurance - missing this step causes claim delays.",
+        "💡 Denial Management: 50-65% of denied claims are never resubmitted, representing significant lost revenue for providers.",
+        "💡 Charge Capture: Accurate charge capture ensures all billable services are documented and billed correctly.",
+        "💡 Payment Posting: Timely payment posting identifies underpayments and helps track payer reimbursement patterns.",
+        "💡 Claims Scrubbing: Automated claims scrubbing catches errors before submission, reducing denial rates by 30-50%.",
+        "💡 Patient Collections: Self-pay accounts should be addressed within 30 days for optimal collection rates.",
       ];
 
       const randomFact = healthcareFacts[Math.floor(Math.random() * healthcareFacts.length)];
