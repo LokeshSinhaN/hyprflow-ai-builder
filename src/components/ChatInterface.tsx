@@ -46,6 +46,7 @@ export const ChatInterface = () => {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [uploadedSops, setUploadedSops] = useState<Array<{ id: string; filename: string; status: string; storage_path: string | null }>>([]);
   const [deletingSopId, setDeletingSopId] = useState<string | null>(null);
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
@@ -172,6 +173,8 @@ export const ChatInterface = () => {
     // Save user message
     await saveMessage("user", userMessage);
 
+    setIsGeneratingScript(true);
+
     try {
       // Call generate-script-rag edge function
       const { data, error } = await supabase.functions.invoke('generate-script-rag', {
@@ -183,13 +186,13 @@ export const ChatInterface = () => {
 
       if (error) throw error;
 
-      const { scripts, chunksUsed } = data;
+      const { scripts, totalChunksUsed, sopCount } = data;
       setGeneratedCode(scripts);
 
       const assistantMessage = {
         role: "assistant" as const,
-        content: chunksUsed > 0
-          ? `I've generated Python and Playwright automation scripts using ${chunksUsed} relevant sections from your uploaded SOPs. Both scripts are ready to use!`
+        content: totalChunksUsed > 0
+          ? `I've generated Python and Playwright automation scripts using ${totalChunksUsed} chunks from ${sopCount} uploaded SOP(s). Both scripts are ready to use!`
           : `I've generated Python and Playwright automation scripts for your workflow. Both scripts are ready to use!`,
       };
 
@@ -197,9 +200,15 @@ export const ChatInterface = () => {
 
       // Save assistant message with code
       await saveMessage("assistant", assistantMessage.content, scripts);
+
+      if (totalChunksUsed > 0) {
+        toast.success(`Scripts generated using ${totalChunksUsed} SOP chunks`);
+      }
     } catch (error) {
       console.error("Error generating script:", error);
       toast.error("Failed to generate script. Please try again.");
+    } finally {
+      setIsGeneratingScript(false);
     }
   };
 
@@ -420,6 +429,18 @@ export const ChatInterface = () => {
           </Card>
         )}
 
+        {/* Script Generation Loading */}
+        {isGeneratingScript && (
+          <Card className="p-4 bg-card/80 backdrop-blur-sm border-accent/30">
+            <div className="flex items-center gap-3 mb-2">
+              <Sparkles className="w-5 h-5 text-accent animate-pulse" />
+              <span className="text-sm font-medium">Generating automation scripts...</span>
+            </div>
+            <Progress value={66} className="h-2" />
+            <p className="text-xs text-muted-foreground mt-2">Analyzing SOP chunks and generating Python + Playwright scripts</p>
+          </Card>
+        )}
+
         {/* Uploaded SOPs */}
         {uploadedSops.length > 0 && (
           <Card className="p-3 bg-card/60 backdrop-blur-sm border-border/50">
@@ -495,7 +516,13 @@ export const ChatInterface = () => {
               }
             }}
           />
-          <Button variant="premium" size="icon" onClick={handleSend} className="h-[100px] w-12">
+          <Button 
+            variant="premium" 
+            size="icon" 
+            onClick={handleSend} 
+            className="h-[100px] w-12"
+            disabled={isGeneratingScript}
+          >
             <Send className="w-5 h-5" />
           </Button>
       </div>
