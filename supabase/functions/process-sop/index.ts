@@ -111,7 +111,7 @@ Deno.serve(async (req) => {
     });
 
     if (collectionCheck.status === 404) {
-      // Create collection
+      // Create collection with payload index on sop_id
       await fetch(`${qdrantUrl}/collections/${collectionName}`, {
         method: 'PUT',
         headers: {
@@ -123,9 +123,15 @@ Deno.serve(async (req) => {
             size: embeddings[0].length,
             distance: 'Cosine',
           },
+          payload_schema: {
+            sop_id: {
+              data_type: 'keyword',
+              index: true,
+            },
+          },
         }),
       });
-      console.log('Created Qdrant collection');
+      console.log('Created Qdrant collection with sop_id index');
     }
 
     // Store points in Qdrant and chunk metadata in Supabase
