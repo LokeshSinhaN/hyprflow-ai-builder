@@ -9,6 +9,7 @@ const corsHeaders = {
 interface GenerateRequest {
   message: string;
   conversationId: string;
+  scriptType?: 'python' | 'playwright' | 'both';
 }
 
 Deno.serve(async (req) => {
@@ -17,8 +18,8 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { message, conversationId }: GenerateRequest = await req.json();
-    console.log('Generating script for message:', message);
+    const { message, conversationId, scriptType = 'both' }: GenerateRequest = await req.json();
+    console.log('Generating script for message:', message, 'Script type:', scriptType);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -50,6 +51,41 @@ Deno.serve(async (req) => {
     
     if (sops && sops.length > 0) {
       console.log(`Retrieving ALL chunks from ${sops.length} SOPs...`);
+      
+      // Ensure Qdrant collection has the sop_id index
+      const collectionName = 'sop_chunks';
+      const collectionInfoResponse = await fetch(`${qdrantUrl}/collections/${collectionName}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'api-key': qdrantApiKey,
+        },
+      });
+
+      if (collectionInfoResponse.ok) {
+        const collectionInfo = await collectionInfoResponse.json();
+        const hasIndex = collectionInfo.result?.payload_schema?.sop_id?.index === true;
+        
+        if (!hasIndex) {
+          console.log('Adding sop_id index to existing collection...');
+          await fetch(`${qdrantUrl}/collections/${collectionName}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'api-key': qdrantApiKey,
+            },
+            body: JSON.stringify({
+              payload_schema: {
+                sop_id: {
+                  data_type: 'keyword',
+                  index: true,
+                },
+              },
+            }),
+          });
+          console.log('Index added successfully');
+        }
+      }
       
       // Fetch ALL points from Qdrant that belong to user's SOPs
       const sopIds = sops.map(sop => sop.id);
@@ -103,6 +139,48 @@ Deno.serve(async (req) => {
       ? `\n\n=== COMPLETE SOP DOCUMENT (ALL CHUNKS) ===\n${allChunks.join('\n')}\n=== END OF SOP DOCUMENT ===\n`
       : '';
 
+    const scriptInstructions = scriptType === 'python' 
+      ? `5. **GENERATE** one complete, production-ready Python script:
+   - Python script using Selenium WebDriver for browser automation
+   - Include proper error handling and logging
+   - Include all necessary imports and setup`
+      : scriptType === 'playwright'
+      ? `5. **GENERATE** one complete, production-ready Playwright script:
+   - Playwright script (JavaScript/TypeScript) for browser automation
+   - Include proper error handling and logging
+   - Include all necessary imports and setup`
+      : `5. **GENERATE** two complete, production-ready scripts upon request:
+   - Python script (using Selenium WebDriver for browser automation)
+   - Playwright script (JavaScript/TypeScript, preserving all logic and steps)`;
+
+    const outputFormat = scriptType === 'python'
+      ? `=== OUTPUT FORMAT ===
+
+You MUST return your response in this EXACT format:
+
+=== PYTHON_SCRIPT ===
+[Complete Python script using Selenium WebDriver]
+=== END_PYTHON_SCRIPT ===`
+      : scriptType === 'playwright'
+      ? `=== OUTPUT FORMAT ===
+
+You MUST return your response in this EXACT format:
+
+=== PLAYWRIGHT_SCRIPT ===
+[Complete Node.js Playwright script]
+=== END_PLAYWRIGHT_SCRIPT ===`
+      : `=== OUTPUT FORMAT ===
+
+You MUST return your response in this EXACT format:
+
+=== PYTHON_SCRIPT ===
+[Complete Python script using Selenium WebDriver]
+=== END_PYTHON_SCRIPT ===
+
+=== PLAYWRIGHT_SCRIPT ===
+[Complete Node.js Playwright script]
+=== END_PLAYWRIGHT_SCRIPT ===`;
+
     const systemPrompt = `You are an Automation Script Generator. Your ONLY source of truth is the SOP document chunks provided below.
 
 === BEHAVIORAL RULES ===
@@ -117,9 +195,7 @@ Deno.serve(async (req) => {
    - UI element descriptions
    - Web automation requirements
 
-5. **GENERATE** two complete, production-ready scripts upon request:
-   - Python script (using Selenium WebDriver for browser automation)
-   - Playwright script (JavaScript/TypeScript, preserving all logic and steps)
+${scriptInstructions}
 
 6. **FOLLOW** these script generation rules:
    - Use correct automation flow based on ALL chunks
@@ -139,17 +215,7 @@ Deno.serve(async (req) => {
    - If chunks are missing: "The provided documents do not contain information for that. Please upload or provide the relevant steps."
    - If user asks something outside chunks: "The provided documents do not contain information for that. Please upload or provide the relevant steps."
 
-=== OUTPUT FORMAT ===
-
-You MUST return your response in this EXACT format:
-
-=== PYTHON_SCRIPT ===
-[Complete Python script using Selenium WebDriver]
-=== END_PYTHON_SCRIPT ===
-
-=== PLAYWRIGHT_SCRIPT ===
-[Complete Node.js Playwright script]
-=== END_PLAYWRIGHT_SCRIPT ===
+${outputFormat}
 
 ${context ? '\n=== YOUR AUTHORITATIVE SOURCE ===\nThe complete SOP document is provided below. You MUST consume and use ALL of it.\n' : '\n=== NO SOP DOCUMENT PROVIDED ===\nNo SOP has been uploaded. Inform the user to upload an SOP first.\n'}`;
 

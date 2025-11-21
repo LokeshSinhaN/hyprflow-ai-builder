@@ -176,11 +176,25 @@ export const ChatInterface = () => {
     setIsGeneratingScript(true);
 
     try {
+      // Detect script type from user message
+      const lowerMessage = userMessage.toLowerCase();
+      let scriptType: 'python' | 'playwright' | 'both' = 'both';
+      
+      if ((lowerMessage.includes('python') || lowerMessage.includes('selenium')) && 
+          !lowerMessage.includes('playwright')) {
+        scriptType = 'python';
+      } else if (lowerMessage.includes('playwright') && 
+                 !lowerMessage.includes('python') && 
+                 !lowerMessage.includes('selenium')) {
+        scriptType = 'playwright';
+      }
+
       // Call generate-script-rag edge function
       const { data, error } = await supabase.functions.invoke('generate-script-rag', {
         body: { 
           message: userMessage,
-          conversationId: currentConversationId 
+          conversationId: currentConversationId,
+          scriptType
         }
       });
 
@@ -189,11 +203,20 @@ export const ChatInterface = () => {
       const { scripts, totalChunksUsed, sopCount } = data;
       setGeneratedCode(scripts);
 
+      let scriptDescription = '';
+      if (scriptType === 'python') {
+        scriptDescription = 'Python (Selenium)';
+      } else if (scriptType === 'playwright') {
+        scriptDescription = 'Playwright';
+      } else {
+        scriptDescription = 'Python and Playwright';
+      }
+
       const assistantMessage = {
         role: "assistant" as const,
         content: totalChunksUsed > 0
-          ? `I've generated Python and Playwright automation scripts using ${totalChunksUsed} chunks from ${sopCount} uploaded SOP(s). Both scripts are ready to use!`
-          : `I've generated Python and Playwright automation scripts for your workflow. Both scripts are ready to use!`,
+          ? `I've generated ${scriptDescription} automation script${scriptType === 'both' ? 's' : ''} using ${totalChunksUsed} chunks from ${sopCount} uploaded SOP(s). ${scriptType === 'both' ? 'Both scripts are' : 'The script is'} ready to use!`
+          : `I've generated ${scriptDescription} automation script${scriptType === 'both' ? 's' : ''} for your workflow. ${scriptType === 'both' ? 'Both scripts are' : 'The script is'} ready to use!`,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
