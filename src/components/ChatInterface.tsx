@@ -47,6 +47,7 @@ export const ChatInterface = () => {
   const [uploadedSops, setUploadedSops] = useState<Array<{ id: string; filename: string; status: string; storage_path: string | null }>>([]);
   const [deletingSopId, setDeletingSopId] = useState<string | null>(null);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [lastFactIndex, setLastFactIndex] = useState<number>(-1);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuth();
 
@@ -226,7 +227,15 @@ export const ChatInterface = () => {
         "💡 Patient Collections: Self-pay accounts should be addressed within 30 days for optimal collection rates.",
       ];
 
-      const randomFact = healthcareFacts[Math.floor(Math.random() * healthcareFacts.length)];
+      // Ensure we get a different fact each time
+      let newFactIndex = Math.floor(Math.random() * healthcareFacts.length);
+      if (healthcareFacts.length > 1) {
+        while (newFactIndex === lastFactIndex) {
+          newFactIndex = Math.floor(Math.random() * healthcareFacts.length);
+        }
+      }
+      setLastFactIndex(newFactIndex);
+      const randomFact = healthcareFacts[newFactIndex];
 
       const assistantMessage = {
         role: "assistant" as const,
