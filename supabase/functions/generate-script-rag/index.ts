@@ -148,30 +148,26 @@ Deno.serve(async (req) => {
     const outputFormat = scriptType === 'python'
       ? `=== OUTPUT FORMAT ===
 
-You MUST return your response in this EXACT format:
-
-=== PYTHON_SCRIPT ===
-[Complete Python script using Selenium WebDriver]
-=== END_PYTHON_SCRIPT ===`
+Return ONLY the complete, ready-to-run Python script. 
+Do NOT include any markdown code fences, delimiters, or explanatory text.
+Just return the raw Python code that can be directly executed.`
       : scriptType === 'playwright'
       ? `=== OUTPUT FORMAT ===
 
-You MUST return your response in this EXACT format:
-
-=== PLAYWRIGHT_SCRIPT ===
-[Complete Node.js Playwright script]
-=== END_PLAYWRIGHT_SCRIPT ===`
+Return ONLY the complete, ready-to-run Playwright script.
+Do NOT include any markdown code fences, delimiters, or explanatory text.
+Just return the raw JavaScript/TypeScript code that can be directly executed.`
       : `=== OUTPUT FORMAT ===
 
-You MUST return your response in this EXACT format:
+Return both scripts in this EXACT format:
 
-=== PYTHON_SCRIPT ===
-[Complete Python script using Selenium WebDriver]
-=== END_PYTHON_SCRIPT ===
+# Python Selenium Script
+[Complete Python script - no markdown fences, no delimiters]
 
-=== PLAYWRIGHT_SCRIPT ===
-[Complete Node.js Playwright script]
-=== END_PLAYWRIGHT_SCRIPT ===`;
+// Playwright Script
+[Complete Playwright script - no markdown fences, no delimiters]
+
+Separate the two scripts with these exact comments only.`;
 
     const systemPrompt = `You are an Automation Script Generator. Your ONLY source of truth is the SOP document chunks provided below.
 

@@ -212,11 +212,27 @@ export const ChatInterface = () => {
         scriptDescription = 'Python and Playwright';
       }
 
+      // Healthcare facts for newbies to US healthcare
+      const healthcareFacts = [
+        "💡 Did you know? In the US, most people get health insurance through their employer, covering about 49% of Americans.",
+        "💡 Healthcare tip: A Primary Care Physician (PCP) is your main doctor who coordinates all your healthcare needs.",
+        "💡 Quick fact: The US healthcare system uses CPT codes to bill for medical procedures - there are over 10,000 different codes!",
+        "💡 Insurance insight: A deductible is the amount you pay before your insurance starts covering costs.",
+        "💡 Good to know: An HMO requires you to choose a primary care doctor and get referrals for specialists.",
+        "💡 Healthcare 101: Co-pay is the fixed amount you pay for each doctor visit or prescription, usually between $10-$50.",
+        "💡 Pro tip: Out-of-network providers cost significantly more than in-network ones - always check first!",
+        "💡 Important: HIPAA laws protect your medical information privacy and give you rights over your health data.",
+        "💡 FYI: Open enrollment is the annual period when you can sign up for or change your health insurance plan.",
+        "💡 Key term: EOB (Explanation of Benefits) shows what your insurance covered and what you owe - not a bill!",
+      ];
+
+      const randomFact = healthcareFacts[Math.floor(Math.random() * healthcareFacts.length)];
+
       const assistantMessage = {
         role: "assistant" as const,
         content: totalChunksUsed > 0
-          ? `I've generated ${scriptDescription} automation script${scriptType === 'both' ? 's' : ''} using ${totalChunksUsed} chunks from ${sopCount} uploaded SOP(s). ${scriptType === 'both' ? 'Both scripts are' : 'The script is'} ready to use!`
-          : `I've generated ${scriptDescription} automation script${scriptType === 'both' ? 's' : ''} for your workflow. ${scriptType === 'both' ? 'Both scripts are' : 'The script is'} ready to use!`,
+          ? `Great! Your ${scriptDescription} automation ${scriptType === 'both' ? 'scripts are' : 'script is'} ready! I used ${totalChunksUsed} chunks from ${sopCount} SOP${sopCount > 1 ? 's' : ''} to build this for you. 🚀\n\n${randomFact}`
+          : `Perfect! I've created your ${scriptDescription} automation ${scriptType === 'both' ? 'scripts' : 'script'}. Ready to automate! 🎯\n\n${randomFact}`,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -370,7 +386,7 @@ export const ChatInterface = () => {
       setTimeout(() => {
         setIsUploading(false);
         setUploadProgress(0);
-        toast.success("SOP uploaded and processing started");
+        toast.success("PDF uploaded! Please enter your prompt to generate automation scripts.");
       }, 500);
     } catch (error) {
       console.error("Upload error:", error);
@@ -530,7 +546,7 @@ export const ChatInterface = () => {
           <Textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="Describe the automation workflow you need..."
+            placeholder="Describe what you want to automate from your SOP..."
             className="min-h-[100px] resize-none bg-card/50 backdrop-blur-sm border-border/50 focus:border-accent/50"
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
