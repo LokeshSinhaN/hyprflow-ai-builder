@@ -47,8 +47,8 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
 
 
   const CodeBlock = ({ code: blockCode, lang }: { code: string; lang: string }) => (
-    <Card className="flex-1 flex flex-col overflow-hidden bg-[#1e1e1e] backdrop-blur-sm border-border/50">
-      <div className="flex-1 overflow-y-auto">
+    <Card className="h-full bg-[#1e1e1e] backdrop-blur-sm border-border/50 overflow-hidden">
+      <div className="h-full overflow-y-auto" style={{ overflowY: 'scroll' }}>
         <Highlight theme={themes.vsDark} code={blockCode} language={lang as any}>
           {({ style, tokens, getLineProps, getTokenProps }) => (
             <pre style={{ ...style, margin: 0, padding: "1.5rem", background: "transparent" }}>
