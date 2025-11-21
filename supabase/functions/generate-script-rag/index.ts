@@ -61,14 +61,21 @@ Deno.serve(async (req) => {
           'api-key': qdrantApiKey,
         },
         body: JSON.stringify({
-          filter: {
-            must: [
-              {
-                key: "sop_id",
-                match: { any: sopIds }
+          filter: sopIds.length === 1 
+            ? {
+                must: [
+                  {
+                    key: "sop_id",
+                    match: { value: sopIds[0] }
+                  }
+                ]
               }
-            ]
-          },
+            : {
+                should: sopIds.map(id => ({
+                  key: "sop_id",
+                  match: { value: id }
+                }))
+              },
           limit: 1000, // Adjust based on expected chunk count
           with_payload: true,
           with_vector: false, // Don't need vectors, just content
