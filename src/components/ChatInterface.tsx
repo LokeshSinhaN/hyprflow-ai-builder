@@ -231,8 +231,8 @@ export const ChatInterface = () => {
       const assistantMessage = {
         role: "assistant" as const,
         content: totalChunksUsed > 0
-          ? `Great! Your ${scriptDescription} automation ${scriptType === 'both' ? 'scripts are' : 'script is'} ready! I used ${totalChunksUsed} chunks from ${sopCount} SOP${sopCount > 1 ? 's' : ''} to build this for you. 🚀\n\n${randomFact}`
-          : `Perfect! I've created your ${scriptDescription} automation ${scriptType === 'both' ? 'scripts' : 'script'}. Ready to automate! 🎯\n\n${randomFact}`,
+          ? `Great! Your ${scriptDescription} automation ${scriptType === 'both' ? 'scripts are' : 'script is'} ready! I used ${totalChunksUsed} chunks from ${sopCount} SOP${sopCount > 1 ? 's' : ''} to build this for you. 🚀\n\n**${randomFact}**`
+          : `Perfect! I've created your ${scriptDescription} automation ${scriptType === 'both' ? 'scripts' : 'script'}. Ready to automate! 🎯\n\n**${randomFact}**`,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -476,7 +476,27 @@ export const ChatInterface = () => {
               <span className="text-sm font-medium">Generating automation scripts...</span>
             </div>
             <Progress value={66} className="h-2" />
-            <p className="text-xs text-muted-foreground mt-2">Analyzing SOP chunks and generating Python + Playwright scripts</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Analyzing SOP chunks and generating {
+                (() => {
+                  const lowerMessage = message.toLowerCase();
+                  if ((lowerMessage.includes('python') || lowerMessage.includes('selenium')) && !lowerMessage.includes('playwright')) {
+                    return 'Python';
+                  } else if (lowerMessage.includes('playwright') && !lowerMessage.includes('python') && !lowerMessage.includes('selenium')) {
+                    return 'Playwright';
+                  }
+                  return 'Python + Playwright';
+                })()
+              } script{(() => {
+                const lowerMessage = message.toLowerCase();
+                if ((lowerMessage.includes('python') || lowerMessage.includes('selenium')) && !lowerMessage.includes('playwright')) {
+                  return '';
+                } else if (lowerMessage.includes('playwright') && !lowerMessage.includes('python') && !lowerMessage.includes('selenium')) {
+                  return '';
+                }
+                return 's';
+              })()}
+            </p>
           </Card>
         )}
 

@@ -237,7 +237,16 @@ ${context ? '\n=== YOUR AUTHORITATIVE SOURCE ===\nThe complete SOP document is p
     }
 
     const aiData = await aiResponse.json();
-    const generatedContent = aiData.choices[0].message.content;
+    let generatedContent = aiData.choices[0].message.content;
+
+    // Remove markdown code fences if present
+    generatedContent = generatedContent
+      .replace(/```python\n?/g, '')
+      .replace(/```javascript\n?/g, '')
+      .replace(/```typescript\n?/g, '')
+      .replace(/```js\n?/g, '')
+      .replace(/```ts\n?/g, '')
+      .replace(/```\n?/g, '');
 
     console.log('Script generation complete');
 
