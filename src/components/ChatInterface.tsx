@@ -479,23 +479,16 @@ export const ChatInterface = () => {
             <p className="text-xs text-muted-foreground mt-2">
               Analyzing SOP chunks and generating {
                 (() => {
-                  const lowerMessage = message.toLowerCase();
+                  const lastUserMsg = messages[messages.length - 1]?.content || '';
+                  const lowerMessage = lastUserMsg.toLowerCase();
                   if ((lowerMessage.includes('python') || lowerMessage.includes('selenium')) && !lowerMessage.includes('playwright')) {
-                    return 'Python';
+                    return 'Python script';
                   } else if (lowerMessage.includes('playwright') && !lowerMessage.includes('python') && !lowerMessage.includes('selenium')) {
-                    return 'Playwright';
+                    return 'Playwright script';
                   }
-                  return 'Python + Playwright';
+                  return 'Python + Playwright scripts';
                 })()
-              } script{(() => {
-                const lowerMessage = message.toLowerCase();
-                if ((lowerMessage.includes('python') || lowerMessage.includes('selenium')) && !lowerMessage.includes('playwright')) {
-                  return '';
-                } else if (lowerMessage.includes('playwright') && !lowerMessage.includes('python') && !lowerMessage.includes('selenium')) {
-                  return '';
-                }
-                return 's';
-              })()}
+              }
             </p>
           </Card>
         )}
