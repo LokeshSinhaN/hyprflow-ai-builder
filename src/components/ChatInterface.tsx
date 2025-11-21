@@ -438,7 +438,14 @@ export const ChatInterface = () => {
                     <Sparkles className="w-4 h-4 text-accent-foreground" />
                   </div>
                 )}
-                <p className="text-sm leading-relaxed">{msg.content}</p>
+                <div className="text-sm leading-relaxed whitespace-pre-line">
+                  {msg.content.split(/(\*\*.*?\*\*)/).map((part, i) => {
+                    if (part.startsWith('**') && part.endsWith('**')) {
+                      return <strong key={i}>{part.slice(2, -2)}</strong>;
+                    }
+                    return part;
+                  })}
+                </div>
               </div>
             </Card>
           ))}
