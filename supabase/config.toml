@@ -1,7 +1,7 @@
 project_id = "dwtdcpevecugfqncmfvp"
 
-[functions.process-sop]
+[functions.validate-email-domain]
 verify_jwt = false
 
-[functions.generate-script-rag]
-verify_jwt = false
+[functions.approve-user]
+verify_jwt = true

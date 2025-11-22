@@ -6,8 +6,13 @@ import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Bot, Sparkles } from "lucide-react";
 import { z } from "zod";
+import logo from "@/assets/logo.png";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
-const emailSchema = z.string().email("Invalid email address").max(255);
+const emailSchema = z.string().email("Invalid email address").max(255).refine(
+  (email) => email.endsWith("@hyprtask.com"),
+  "Only @hyprtask.com email addresses are allowed"
+);
 const passwordSchema = z.string().min(6, "Password must be at least 6 characters");
 const nameSchema = z.string().min(2, "Name must be at least 2 characters").max(100);
 
@@ -65,16 +70,25 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-secondary p-4">
+    <div className="min-h-screen flex items-center justify-center p-4 relative" style={{ background: 'var(--background-gradient)' }}>
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <Card className="w-full max-w-md p-8 bg-card/50 backdrop-blur-lg border-border/50">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
-            <div className="p-3 rounded-xl bg-gradient-primary shadow-glow">
-              <Bot className="w-8 h-8 text-accent-foreground" />
-            </div>
+            <img src={logo} alt="hyprtask logo" className="w-16 h-16 rounded-lg" />
           </div>
-          <h1 className="text-3xl font-bold mb-2">hyprFlow</h1>
-          <p className="text-muted-foreground">AI Workflow Generator for hyprTeams</p>
+          <h1 className="text-3xl font-bold mb-1">hyprtask</h1>
+          <p className="text-sm text-muted-foreground mb-2">hyprFlow</p>
+          <p className="text-muted-foreground text-sm">Create powerful automation workflows with AI</p>
+          {!isLogin && (
+            <div className="mt-3 p-2 bg-accent/10 rounded-md border border-accent/20">
+              <p className="text-xs text-accent font-medium">
+                ✓ Only @hyprtask.com email addresses are accepted
+              </p>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -143,39 +157,16 @@ const Auth = () => {
           </button>
         </div>
 
-        <div className="mt-6 p-4 bg-muted/30 rounded-lg border border-border/30">
-          <p className="text-xs text-muted-foreground text-center mb-3 font-semibold">
-            {isLogin ? "Demo Account" : "Create Demo Account"}
-          </p>
-          {isLogin ? (
-            <>
-              <p className="text-xs text-muted-foreground mb-2">
-                Don't have an account yet? Switch to sign up and use:
-              </p>
-              <p className="text-xs text-muted-foreground">Email: demo@hyprflow.com</p>
-              <p className="text-xs text-muted-foreground">Password: demo123456</p>
-            </>
-          ) : (
-            <>
-              <p className="text-xs text-muted-foreground mb-2">
-                Create your account with these credentials:
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full mt-2"
-                onClick={() => {
-                  setEmail("demo@hyprflow.com");
-                  setPassword("demo123456");
-                  setFullName("Demo User");
-                }}
-              >
-                Fill Demo Credentials
-              </Button>
-            </>
-          )}
-        </div>
+        {isLogin && (
+          <div className="mt-6 p-4 bg-muted/30 rounded-lg border border-border/30">
+            <p className="text-xs text-muted-foreground text-center mb-2 font-semibold">
+              Approved Users Only
+            </p>
+            <p className="text-xs text-muted-foreground text-center">
+              New accounts require administrator approval before accessing the application.
+            </p>
+          </div>
+        )}
       </Card>
     </div>
   );

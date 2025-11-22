@@ -1,30 +1,40 @@
 import { Link, useLocation } from "react-router-dom";
-import { Bot, Library, MessageSquare, LogOut } from "lucide-react";
+import { Bot, Library, MessageSquare, LogOut, BarChart3, Shield, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
+import logo from "@/assets/logo.png";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export const Layout = ({ children }: { children: React.ReactNode }) => {
   const location = useLocation();
-  const { signOut, user } = useAuth();
+  const { signOut, user, isAdmin } = useAuth();
 
   const navItems = [
     { to: "/", icon: MessageSquare, label: "Chat" },
     { to: "/library", icon: Library, label: "Library" },
+    { to: "/dashboard", icon: BarChart3, label: "Dashboard" },
+    ...(isAdmin ? [
+      { to: "/admin", icon: Shield, label: "Admin" },
+      { to: "/activity-logs", icon: Activity, label: "Activity Logs" }
+    ] : []),
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-secondary">
+    <div className="min-h-screen flex flex-col" style={{ background: 'var(--background-gradient)' }}>
       {/* Header */}
       <header className="border-b border-border/50 backdrop-blur-lg bg-card/30 sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="p-2 rounded-lg bg-gradient-primary shadow-glow">
-              <Bot className="w-5 h-5 text-accent-foreground" />
+            <img src={logo} alt="hyprtask logo" className="w-8 h-8 rounded-lg" />
+            <div className="flex flex-col">
+              <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+                hyprtask
+              </span>
+              <span className="text-xs text-muted-foreground -mt-1">
+                hyprFlow
+              </span>
             </div>
-            <span className="text-xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-              hyprFlow
-            </span>
           </Link>
 
           <div className="flex items-center gap-4">
@@ -45,6 +55,8 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
                 </Link>
               ))}
             </nav>
+
+            <ThemeToggle />
 
             {user && (
               <Button variant="ghost" size="sm" onClick={signOut}>
