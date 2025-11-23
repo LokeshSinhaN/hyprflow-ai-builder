@@ -4,4 +4,10 @@ project_id = "dwtdcpevecugfqncmfvp"
 verify_jwt = false
 
 [functions.approve-user]
-verify_jwt = true
+verify_jwt = false
+
+[functions.process-sop]
+verify_jwt = false
+
+[functions.generate-script-rag]
+verify_jwt = false

@@ -6,28 +6,40 @@ import { toast } from "sonner";
 import { Highlight, themes } from "prism-react-renderer";
 import { supabase } from "@/integrations/supabase/client";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 
 interface CodeViewerProps {
-  code: string;
-  language?: string;
+  pythonCode: string;
+  playwrightCode?: string | null;
 }
 
-export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
+export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
+  const [activeTab, setActiveTab] = useState<"python" | "playwright">("python");
   const [isRunning, setIsRunning] = useState(false);
   const [output, setOutput] = useState<{ stdout: string; stderr: string; error?: string } | null>(null);
   const [showOutput, setShowOutput] = useState(false);
 
+  const currentCode =
+    activeTab === "python"
+      ? pythonCode
+      : playwrightCode || "# Playwright Python script is not available for this SOP.\n";
+
+  // Both scripts are Python (Selenium & Playwright)
+  const currentLanguage = "python";
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(code);
+    navigator.clipboard.writeText(currentCode);
     toast.success("Code copied to clipboard!");
   };
 
   const handleDownload = () => {
-    const blob = new Blob([code], { type: "text/plain" });
+    const filename =
+      activeTab === "python" ? "automation_script_selenium.py" : "automation_script_playwright.py";
+    const blob = new Blob([currentCode], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `automation_script.${language === "python" ? "py" : "txt"}`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -36,13 +48,18 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
   };
 
   const handleRun = async () => {
+    if (activeTab !== "python") {
+      toast.error("Execution is only supported for the Selenium Python script. Switch to the Python tab to run.");
+      return;
+    }
+
     setIsRunning(true);
     setOutput(null);
     setShowOutput(true);
     
     try {
       const { data, error } = await supabase.functions.invoke('execute-python', {
-        body: { code }
+        body: { code: pythonCode }
       });
 
       if (error) throw error;
@@ -76,9 +93,46 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
 
   return (
     <div className="h-full flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Generated Script</h2>
-        <div className="flex gap-2">
+      {/* Header: title, language tabs, and actions all in a single flex row that can wrap */}
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-lg font-semibold mr-1">Generated Scripts</h2>
+
+        {/* Language tabs */}
+        <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/60 px-1 py-0.5 shadow-sm">
+          <Button
+            type="button"
+            variant={activeTab === "python" ? "secondary" : "ghost"}
+            size="sm"
+            className={cn(
+              "h-8 rounded-full px-3 text-xs font-medium transition-all",
+              activeTab === "python"
+                ? "bg-gradient-to-r from-accent to-primary text-primary-foreground shadow"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => setActiveTab("python")}
+          >
+            Python (Selenium)
+          </Button>
+          <Button
+            type="button"
+            variant={activeTab === "playwright" ? "secondary" : "ghost"}
+            size="sm"
+            className={cn(
+              "h-8 rounded-full px-3 text-xs font-medium transition-all",
+              activeTab === "playwright"
+                ? "bg-gradient-to-r from-accent to-primary text-primary-foreground shadow"
+                : "text-muted-foreground hover:text-foreground",
+              !playwrightCode && "opacity-60 cursor-not-allowed"
+            )}
+            onClick={() => playwrightCode && setActiveTab("playwright")}
+            disabled={!playwrightCode}
+          >
+            Python (Playwright)
+          </Button>
+        </div>
+
+        {/* Actions: directly after tabs, wrap onto next line if necessary */}
+        <div className="flex gap-2 items-center flex-wrap ml-2">
           <Button variant="ghost" size="sm" onClick={handleCopy}>
             <Copy className="w-4 h-4" />
             Copy
@@ -87,9 +141,9 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
             <Download className="w-4 h-4" />
             Download
           </Button>
-          <Button 
-            variant="premium" 
-            size="sm" 
+          <Button
+            variant="premium"
+            size="sm"
             onClick={handleRun}
             disabled={isRunning}
           >
@@ -105,7 +159,7 @@ export const CodeViewer = ({ code, language = "python" }: CodeViewerProps) => {
 
       <Card className="flex-1 overflow-hidden bg-[#1e1e1e] backdrop-blur-sm border-border/50">
         <div className="h-full overflow-auto">
-          <Highlight theme={themes.vsDark} code={code} language={language as any}>
+          <Highlight theme={themes.vsDark} code={currentCode} language={currentLanguage as any}>
             {({ style, tokens, getLineProps, getTokenProps }) => (
               <pre style={{ ...style, margin: 0, padding: "1.5rem", background: "transparent" }}>
                 {tokens.map((line, i) => (

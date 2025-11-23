@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -26,12 +27,19 @@ export const ChatHistory = ({
   onNewConversation,
 }: ChatHistoryProps) => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const { user } = useAuth();
 
   useEffect(() => {
+    if (!user) {
+      setConversations([]);
+      return;
+    }
     loadConversations();
-  }, []);
+  }, [user]);
 
   const loadConversations = async () => {
+    if (!user) return;
+
     const { data, error } = await supabase
       .from("conversations")
       .select("*")
@@ -46,6 +54,8 @@ export const ChatHistory = ({
   };
 
   const handleDelete = async (id: string) => {
+    if (!user) return;
+
     const { error } = await supabase.from("conversations").delete().eq("id", id);
 
     if (error) {

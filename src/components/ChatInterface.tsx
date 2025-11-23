@@ -8,105 +8,70 @@ import { CodeViewer } from "./CodeViewer";
 import { supabase } from "@/integrations/supabase/client";
 import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/hooks/useAuth";
+import { Badge } from "@/components/ui/badge";
 
 const MAX_MESSAGE_LENGTH = 10000;
 
+interface SOPDocument {
+  id: string;
+  title: string;
+  filename: string;
+  status: "uploaded" | "processing" | "indexed" | "failed";
+  created_at: string;
+  content?: string; // Local-only SOP content for context (not persisted)
+}
+
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
-  const [generatedCode, setGeneratedCode] = useState("");
+  const [generatedScripts, setGeneratedScripts] =
+    useState<{ python: string; playwright?: string | null } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>("local-conversation");
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // In auth-free dev mode, conversations and SOPs are kept entirely in local state.
   useEffect(() => {
-    if (user && !currentConversationId) {
-      createNewConversation();
+    // Initialize a blank local conversation on first render
+    if (!currentConversationId) {
+      setCurrentConversationId("local-conversation");
     }
-  }, [user]);
+  }, [currentConversationId]);
+
+  const handleDeleteSOP = (sopId: string) => {
+    // Local-only delete; we don't touch the database in dev mode.
+    setSopDocuments((prev) => prev.filter((doc) => doc.id !== sopId));
+    toast.success("SOP removed from current session");
+  };
 
   const createNewConversation = async () => {
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from("conversations")
-      .insert({
-        user_id: user.id,
-        title: "New Workflow",
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error creating conversation:", error);
-      toast.error("Failed to create conversation");
-      return;
-    }
-
-    setCurrentConversationId(data.id);
+    // Local-only conversations: just reset state.
+    setCurrentConversationId("local-conversation-" + Date.now().toString());
     setMessages([]);
-    setGeneratedCode("");
+    setGeneratedScripts(null);
   };
 
-  const loadConversation = async (conversationId: string) => {
-    const { data, error } = await supabase
-      .from("chat_messages")
-      .select("*")
-      .eq("conversation_id", conversationId)
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      console.error("Error loading messages:", error);
-      toast.error("Failed to load conversation");
-      return;
-    }
-
-    setCurrentConversationId(conversationId);
-    const loadedMessages = data.map((msg) => ({
-      role: msg.role as "user" | "assistant",
-      content: msg.content,
-    }));
-
-    // If there's code in the last message, show it
-    const lastMessageWithCode = data.reverse().find((msg) => msg.code);
-    if (lastMessageWithCode) {
-      setGeneratedCode(lastMessageWithCode.code);
-    }
-
-    setMessages(loadedMessages);
+  const loadConversation = async (_conversationId: string) => {
+    // In dev mode we don't persist multiple conversations; this is a no-op.
+    return;
   };
 
-  const saveMessage = async (role: "user" | "assistant", content: string, code?: string) => {
-    if (!currentConversationId) return;
-
-    const { error } = await supabase.from("chat_messages").insert({
-      conversation_id: currentConversationId,
-      role,
-      content,
-      code: code || null,
-    });
-
-    if (error) {
-      console.error("Error saving message:", error);
-    }
-
-    // Update conversation title if it's the first user message
-    if (role === "user" && messages.length === 0) {
-      const title = content.substring(0, 50) + (content.length > 50 ? "..." : "");
-      await supabase
-        .from("conversations")
-        .update({ title })
-        .eq("id", currentConversationId);
-    }
+  const saveMessage = async (_role: "user" | "assistant", _content: string, _code?: string) => {
+    // No-op in auth-free dev mode; messages are already in local React state.
+    return;
   };
 
   const handleSend = async () => {
-    if (!message.trim() || !currentConversationId) return;
-    
+    if (!message.trim()) return;
+
+    // Require at least one indexed SOP with content before generating scripts
+    if (!sopDocuments.some((d) => d.status === "indexed" && d.content)) {
+      toast.error("Please upload at least one SOP PDF before generating a script.");
+      return;
+    }
+
     if (message.length > MAX_MESSAGE_LENGTH) {
       toast.error(`Message too long. Maximum ${MAX_MESSAGE_LENGTH.toLocaleString()} characters allowed.`);
       return;
@@ -117,36 +82,41 @@ export const ChatInterface = () => {
     setMessages(newMessages);
     setMessage("");
 
-    // Save user message
+    // Messages are already stored in local state; no persistence needed.
     await saveMessage("user", userMessage);
 
+    setIsProcessing(true);
+
     try {
-      // Call edge function to generate Python script with AI
-      const { data, error } = await supabase.functions.invoke('generate-script', {
-        body: { 
+      // Build optional SOP context from locally uploaded documents.
+      const sopContext = sopDocuments
+        .filter((doc) => doc.status === "indexed" && doc.content)
+        .map((doc, idx) => `\n\n=== SOP ${idx + 1}: ${doc.title} ===\n${doc.content}`)
+        .join("\n");
+
+      // Use generate-script-rag edge function so SOP context is handled via RAG-style prompt.
+      const { data, error } = await supabase.functions.invoke("generate-script-rag", {
+        body: {
           message: userMessage,
-          document: uploadedDocument 
-        }
+          sop_text: sopContext || undefined,
+        },
       });
 
       if (error) throw error;
-
       if (data.error) {
         throw new Error(data.error);
       }
 
-      const script = data.script;
-      setGeneratedCode(script);
+      // RAG function may return { scripts: { python_selenium, python_playwright, ... } }
+      const pythonScript =
+        (data.scripts?.python_selenium || data.scripts?.python || data.script) as string;
+      const playwrightScript = (data.scripts?.python_playwright ?? null) as string | null;
 
-      // Log script generation activity
-      if (user) {
-        await supabase.rpc('log_user_activity', {
-          _user_id: user.id,
-          _activity_type: 'script_generated',
-          _activity_description: 'User generated a Python script',
-          _metadata: { conversation_id: currentConversationId, prompt_length: userMessage.length }
-        });
-      }
+      setGeneratedScripts({ python: pythonScript, playwright: playwrightScript });
+
+      const contextInfo = sopContext
+        ? " I used your uploaded SOP documents as additional context."
+        : "";
 
       const assistantMessage = {
         role: "assistant" as const,
@@ -155,8 +125,8 @@ export const ChatInterface = () => {
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      // Save assistant message with code
-      await saveMessage("assistant", assistantMessage.content, script);
+      // Save assistant message with primary Python code (no-op in dev mode)
+      await saveMessage("assistant", assistantMessage.content, pythonScript);
       
       // Clear uploaded document after successful generation
       if (uploadedDocument) {
@@ -173,59 +143,79 @@ export const ChatInterface = () => {
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const file = event.target.files?.[0];
+  if (!file) return;
 
-    if (file.type !== "application/pdf") {
-      toast.error("Please upload a PDF file");
-      event.target.value = "";
-      return;
+  if (file.type !== "application/pdf") {
+    toast.error("Please upload a PDF file");
+    event.target.value = "";
+    return;
+  }
+
+  setIsProcessing(true);
+  const loadingToast = toast.loading(`Uploading "${file.name}"...`);
+
+  try {
+    // Create FormData and upload via fetch. No auth or user_id required in dev mode.
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(
+      `${supabase.supabaseUrl}/functions/v1/process-sop`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Upload failed");
     }
 
-    setIsProcessing(true);
-    toast.loading(`Processing "${file.name}"...`);
+    const data = await response.json();
 
-    try {
-      // Upload file to temporary storage
-      const formData = new FormData();
-      formData.append('file', file);
+    if (data.error) throw new Error(data.error);
 
-      // Create a temporary file path
-      const tempPath = `user-uploads://${file.name}`;
-      
-      // Create blob from file
-      const arrayBuffer = await file.arrayBuffer();
-      const blob = new Blob([arrayBuffer], { type: file.type });
-      
-      // Store file temporarily (you would need to implement actual file storage)
-      // For now, we'll read the file content directly
-      const reader = new FileReader();
-      
-      reader.onload = async (e) => {
-        const content = e.target?.result;
-        if (typeof content === 'string') {
-          setUploadedDocument(content);
-          toast.success(`SOP document "${file.name}" processed successfully! You can now ask me to generate automation scripts based on it.`);
-          setMessage(`Generate a Python automation script based on the uploaded SOP workflow document.`);
-        }
-      };
-      
-      reader.readAsText(file);
-    } catch (error) {
-      console.error("Error processing PDF:", error);
-      toast.error("Failed to process PDF. Please try again.");
-    } finally {
-      setIsProcessing(false);
-      event.target.value = "";
-    }
-  };
+    toast.dismiss(loadingToast);
+    toast.success(
+      `SOP "${data.title || file.name}" uploaded successfully and processed for this session.`,
+    );
+
+    // Store SOP locally so it can be used as context in generate-script.
+    const newDoc: SOPDocument = {
+      id: data.sopId || `${Date.now()}`,
+      title: data.title || file.name,
+      filename: file.name,
+      status: "indexed",
+      created_at: new Date().toISOString(),
+      content: data.fullContent || data.content || "",
+    };
+
+    setSopDocuments((prev) => [newDoc, ...prev]);
+
+    // Set suggested message
+    setMessage(
+      `Generate a Python automation script based on the uploaded SOP: ${data.title || file.name}`,
+    );
+
+  } catch (error) {
+    console.error("Error uploading SOP:", error);
+    toast.dismiss(loadingToast);
+    toast.error(error instanceof Error ? error.message : "Failed to upload SOP. Please try again.");
+  } finally {
+    setIsProcessing(false);
+    event.target.value = "";
+  }
+};
+
 
   const handleScreenCapture = () => {
     toast.info("Coming Soon");
   };
 
   return (
-    <div className="h-[calc(100vh-12rem)] flex gap-4">
+    <div className="h-[calc(100vh-12rem)] flex gap-4 overflow-hidden">
       {/* Chat History Sidebar */}
       {showHistory && (
         <div className="w-64 flex-shrink-0">
@@ -238,7 +228,7 @@ export const ChatInterface = () => {
       )}
 
       {/* Left Panel - Chat */}
-      <div className="flex-1 flex flex-col gap-4">
+      <div className="flex-1 min-h-0 flex flex-col gap-4">
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto space-y-4 pr-2">
           {messages.map((msg, idx) => (
@@ -316,9 +306,12 @@ export const ChatInterface = () => {
       </div>
 
       {/* Right Panel - Code Viewer */}
-      <div className="flex-1">
-        {generatedCode ? (
-          <CodeViewer code={generatedCode} language="python" />
+      <div className="flex-1 min-h-0 flex flex-col">
+        {generatedScripts ? (
+          <CodeViewer
+            pythonCode={generatedScripts.python}
+            playwrightCode={generatedScripts.playwright ?? undefined}
+          />
         ) : (
           <Card className="h-full flex items-center justify-center bg-card/30 backdrop-blur-sm border-border/50 border-dashed">
             <div className="text-center text-muted-foreground p-8">
