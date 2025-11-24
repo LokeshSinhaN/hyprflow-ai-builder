@@ -7,6 +7,28 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Utility to remove markdown-style code fences (```python ... ```)
+const stripCodeFences = (code: string | null): string | null => {
+  if (!code) return code;
+  let cleaned = code.trim();
+
+  // If it starts with ```... remove the first line
+  if (cleaned.startsWith("```")) {
+    const lines = cleaned.split(/\r?\n/);
+    lines.shift();
+    cleaned = lines.join("\n");
+  }
+
+  // If it ends with a ``` line, remove the last line
+  const lines = cleaned.split(/\r?\n/);
+  if (lines.length > 0 && lines[lines.length - 1].trim() === "```") {
+    lines.pop();
+    cleaned = lines.join("\n");
+  }
+
+  return cleaned.trim();
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -22,8 +44,15 @@ serve(async (req) => {
     }
 
     let sopContext = sop_text || "";
-    let contextSource = sopContext ? "frontend" : "none";
-    let sopFileName = sopContext ? "Uploaded SOP" : "";
+    const contextSource = sopContext ? "frontend" : "none";
+    const sopFileName = sopContext ? "Uploaded SOP" : "";
+
+    // To keep latency reasonable, cap the amount of SOP text we send to the model.
+    const MAX_SOP_CHARS = 40000;
+    if (sopContext.length > MAX_SOP_CHARS) {
+      console.warn(`Truncating SOP context from ${sopContext.length} to ${MAX_SOP_CHARS} characters`);
+      sopContext = sopContext.slice(0, MAX_SOP_CHARS);
+    }
 
     if (!sopContext) {
       console.warn("No SOP context provided; generating script from user request only.");
@@ -50,6 +79,8 @@ BROWSER-SCOPE REQUIREMENTS:
 
 Return your response in this EXACT format (do not deviate):
 
+IMPORTANT: DO NOT use Markdown-style triple-backtick code fences (no fenced "python" blocks). Return only plain Python code between the markers.
+
 === PYTHON_SELENIUM_SCRIPT ===
 [Complete Python script using Selenium WebDriver]
 === END_PYTHON_SELENIUM_SCRIPT ===
@@ -62,6 +93,7 @@ GENERAL CODE STYLE FOR BOTH SCRIPTS:
 - Organize the code into small functions, one per major browser step (e.g. login, open_remittance_page, click_clearinghouse_connection_tab, open_target_file_link).
 - At the top of each function, add a short comment explaining what the step does and, if applicable, which SOP step it corresponds to.
 - Include a small configuration section (constants) for base URLs, credentials/placeholders, and any reused selectors.
+- Do NOT read configuration from environment variables (no os.getenv, no os.environ). Instead, declare plain Python constants with clear placeholder values, e.g. INSTAGRAM_USERNAME = "your_instagram_username".
 - Use clear variable names and avoid deeply nested logic where possible.
 
 PYTHON SELENIUM SCRIPT SPECIFICS:
@@ -107,7 +139,8 @@ Ignore or leave TODO-style comments for any steps that require parsing downloade
             },
           ],
           generationConfig: {
-            temperature: 0.3,
+            temperature: 0.2,
+            // 4000 tokens is usually enough for two full scripts and is faster than 6000/16000
             maxOutputTokens: 16000,
           },
         }),
@@ -159,62 +192,55 @@ Ignore or leave TODO-style comments for any steps that require parsing downloade
     const pythonSeleniumMatch = generatedContent.match(/=== PYTHON_SELENIUM_SCRIPT ===\s*\n([\s\S]*?)\n=== END_PYTHON_SELENIUM_SCRIPT ===/);
     const pythonPlaywrightMatch = generatedContent.match(/=== PYTHON_PLAYWRIGHT_SCRIPT ===\s*\n([\s\S]*?)\n=== END_PYTHON_PLAYWRIGHT_SCRIPT ===/);
 
-    const pythonSeleniumScript = pythonSeleniumMatch ? pythonSeleniumMatch[1].trim() : null;
-    const pythonPlaywrightScript = pythonPlaywrightMatch ? pythonPlaywrightMatch[1].trim() : null;
+    let pythonSeleniumScript = pythonSeleniumMatch ? pythonSeleniumMatch[1].trim() : null;
+    let pythonPlaywrightScript = pythonPlaywrightMatch ? pythonPlaywrightMatch[1].trim() : null;
 
-    if (!pythonSeleniumScript || !pythonPlaywrightScript) {
-      console.error("Failed to parse scripts from AI response");
-      console.error("Generated content:", generatedContent.substring(0, 1000));
+    // Clean up any stray markdown code fences the model might have added
+    pythonSeleniumScript = stripCodeFences(pythonSeleniumScript);
+    pythonPlaywrightScript = stripCodeFences(pythonPlaywrightScript);
+
+    let haveSelenium = !!pythonSeleniumScript;
+    let havePlaywright = !!pythonPlaywrightScript;
+
+    if (!haveSelenium || !havePlaywright) {
+      console.error("Failed to parse one or both scripts from AI response using primary delimiters");
+      console.error("Generated content (first 1000 chars):", generatedContent.substring(0, 1000));
       
-      // Try alternative parsing if primary fails
-      const altSeleniumMatch = generatedContent.match(/``````/);
-      const allPythonBlocks = generatedContent.match(/``````/g);
-      
-      if (allPythonBlocks && allPythonBlocks.length >= 2) {
-        console.log("Using alternative parsing method with code blocks");
-        const selenium = allPythonBlocks[0].replace(/``````\s*$/, '').trim();
-        const playwright = allPythonBlocks[1].replace(/``````\s*$/, '').trim();
-        
-        return new Response(
-          JSON.stringify({
-            scripts: {
-              python_selenium: selenium,
-              python_playwright: playwright,
-              raw: generatedContent,
-            },
-            model_used: "gemini-2.5-flash",
-            context_used: sopContext.length,
-            context_source: contextSource,
-            sop_file: sopFileName,
-            retrieval_method: "long_context_injection",
-            parsing_method: "alternative",
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
-        );
+      // Try alternative parsing: look for ```python ... ``` style blocks
+      const fencedMatch = generatedContent.match(/```python[\s\S]*?```/gi);
+      if (fencedMatch && fencedMatch.length >= 1) {
+        console.log("Using fenced code block parsing fallback");
+        if (!haveSelenium) {
+          pythonSeleniumScript = stripCodeFences(fencedMatch[0]);
+          haveSelenium = !!pythonSeleniumScript;
+        }
+        if (!havePlaywright && fencedMatch.length >= 2) {
+          pythonPlaywrightScript = stripCodeFences(fencedMatch[1]);
+          havePlaywright = !!pythonPlaywrightScript;
+        }
       }
 
-      // Return raw content if parsing fails
-      return new Response(
-        JSON.stringify({
-          scripts: {
-            python_selenium: generatedContent,
-            python_playwright: null,
-            raw: generatedContent,
-          },
-          model_used: "gemini-2.5-flash",
-          context_used: sopContext.length,
-          context_source: contextSource,
-          sop_file: sopFileName,
-          retrieval_method: "long_context_injection",
-          warning: "Failed to parse scripts - returning raw content",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
-      );
+      // Final fallback: if we still have neither script, strip fences from the whole content
+      if (!haveSelenium && !havePlaywright) {
+        console.warn("Falling back to stripCodeFences on entire generated content");
+        const cleaned = stripCodeFences(generatedContent) ?? generatedContent;
+        pythonSeleniumScript = cleaned;
+        haveSelenium = true;
+      }
     }
 
-    console.log("✅ Successfully generated both Python scripts using Long Context Injection");
+    // At this point we guarantee at least a Selenium script; Playwright may be null
+    if (!pythonSeleniumScript) {
+      throw new Error("Unable to extract a Python Selenium script from model output.");
+    }
+
+    console.log("✅ Successfully generated Python scripts using Long Context Injection");
     console.log(`   - Python Selenium script: ${pythonSeleniumScript.length} characters`);
-    console.log(`   - Python Playwright script: ${pythonPlaywrightScript.length} characters`);
+    if (pythonPlaywrightScript) {
+      console.log(`   - Python Playwright script: ${pythonPlaywrightScript.length} characters`);
+    } else {
+      console.log("   - Python Playwright script: not available (generation or parsing truncated)");
+    }
     console.log(`   - Context source: ${contextSource}`);
     console.log(`   - SOP file: ${sopFileName || "none"}`);
 

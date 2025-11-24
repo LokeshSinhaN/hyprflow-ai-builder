@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -9,6 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const MAX_MESSAGE_LENGTH = 10000;
 
@@ -21,6 +23,92 @@ interface SOPDocument {
   content?: string; // Local-only SOP content for context (not persisted)
 }
 
+type RunStep = "idle" | "collecting" | "running";
+
+interface RunOutput {
+  stdout: string;
+  stderr: string;
+  error?: string;
+}
+
+interface RunConfigField {
+  name: string;
+  defaultValue?: string;
+}
+
+type RunConfigValues = Record<string, string>;
+
+const extractRunConfigFields = (code: string): RunConfigField[] => {
+  const lines = code.split(/\r?\n/);
+  const fields: RunConfigField[] = [];
+
+  let inConfig = false;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Enter config section on a line like "# --- Configuration ---" or "# Configuration"
+    if (!inConfig && (/#\s*-+\s*configuration/i.test(trimmed) || /#\s*configuration/i.test(trimmed))) {
+      inConfig = true;
+      continue;
+    }
+
+    if (!inConfig) continue;
+
+    // Stop when we hit function definitions or main guard
+    if (/^def\s+\w+\s*\(/.test(trimmed) || /^if __name__\s*==/.test(trimmed)) {
+      break;
+    }
+
+    const match = /^([A-Z_][A-Z0-9_]*)\s*=\s*(.+)$/.exec(trimmed);
+    if (!match) continue;
+
+    const [, name, rawValue] = match;
+    const lowerName = name.toLowerCase();
+
+    // Ignore obvious selector / locator style constants which the LLM can derive
+    if (/selector|xpath|css|locator/.test(lowerName)) continue;
+
+    // Only consider string values
+    let defaultValue: string | undefined;
+    const strMatch = rawValue.trim().match(/^(['"])(.*)\1/);
+    if (strMatch) {
+      defaultValue = strMatch[2];
+    } else {
+      continue;
+    }
+
+    const dv = defaultValue ?? "";
+
+    // Heuristics: which constants should be user-specified?
+    const isCredential = /password|passwd|token|secret|key/.test(lowerName);
+    const isIdentity = /username|user_name|user\b|email|account/.test(lowerName);
+    const isUrl = /url/.test(lowerName);
+    const isPathLike = /path|folder|directory|download/.test(lowerName);
+    const isSearchLike = /hashtag|search|query|keyword|term/.test(lowerName);
+
+    // Obvious placeholders: your_*, example.com, TODO, angle-brace templates, etc.
+    const looksPlaceholder = /your_|example\.com|<|TODO/i.test(dv);
+
+    // Decide if this constant should be asked from the user.
+    // - Always ask for credentials, identity, and search-like values.
+    // - For URLs/paths, only ask when the value looks like a placeholder or is empty.
+    const shouldAskUser =
+      isCredential ||
+      isIdentity ||
+      isSearchLike ||
+      looksPlaceholder ||
+      ((isUrl || isPathLike) && (looksPlaceholder || dv.trim().length === 0));
+
+    if (!shouldAskUser) continue;
+
+    fields.push({ name, defaultValue });
+  }
+
+  return fields;
+};
+
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
   const [generatedScripts, setGeneratedScripts] =
@@ -32,6 +120,14 @@ export const ChatInterface = () => {
   const [sopDocuments, setSopDocuments] = useState<SOPDocument[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cloud run state (Selenium only, driven by generated code)
+  const [runStep, setRunStep] = useState<RunStep>("idle");
+  const [runConfigFields, setRunConfigFields] = useState<RunConfigField[]>([]);
+  const [runConfig, setRunConfig] = useState<RunConfigValues>({});
+  const [pendingRunCode, setPendingRunCode] = useState<string | null>(null);
+  const [runOutput, setRunOutput] = useState<RunOutput | null>(null);
+  const [isRunExecuting, setIsRunExecuting] = useState(false);
 
   // In auth-free dev mode, conversations and SOPs are kept entirely in local state.
   useEffect(() => {
@@ -70,8 +166,111 @@ export const ChatInterface = () => {
     return;
   };
 
+  const buildConfiguredRunCode = () => {
+    if (!pendingRunCode) return null;
+    let configured = pendingRunCode;
+
+    runConfigFields.forEach((field) => {
+      const raw = (runConfig[field.name] ?? field.defaultValue ?? "").trim();
+      if (!raw) return;
+
+      const safeValue = raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const pattern = new RegExp(`^\\s*${field.name}\\s*=.*$`, "m");
+      const replacement = `${field.name} = "${safeValue}"`;
+
+      if (pattern.test(configured)) {
+        configured = configured.replace(pattern, replacement);
+      } else {
+        // If the constant wasn't found (edge case), prepend it.
+        configured = `${replacement}\n${configured}`;
+      }
+    });
+
+    return configured;
+  };
+
+  const executeSeleniumRun = async () => {
+    const configuredCode = buildConfiguredRunCode();
+    if (!configuredCode) {
+      toast.error("No Selenium script available to run.");
+      setRunStep("idle");
+      return;
+    }
+
+    setIsRunExecuting(true);
+    setRunOutput(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("execute-python", {
+        body: { code: configuredCode },
+      });
+
+      if (error) throw error;
+
+      if (data.error) {
+        setRunOutput({
+          stdout: data.stdout || "",
+          stderr: data.stderr || "",
+          error: data.error,
+        });
+        toast.error("Script execution failed");
+      } else {
+        setRunOutput({
+          stdout: data.stdout || "",
+          stderr: data.stderr || "",
+        });
+        toast.success("Script executed successfully!");
+      }
+    } catch (error) {
+      console.error("Error running Selenium script:", error);
+      setRunOutput({
+        stdout: "",
+        stderr: "",
+        error: error instanceof Error ? error.message : "Failed to execute script",
+      });
+      toast.error("Failed to execute script");
+    } finally {
+      setIsRunExecuting(false);
+      setRunStep("idle");
+    }
+  };
+
+  const handleSubmitRunConfig = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const missing = runConfigFields
+      .filter((field) => !(runConfig[field.name] ?? field.defaultValue)?.toString().trim())
+      .map((field) => field.name);
+
+    if (missing.length > 0) {
+      toast.error(`Please provide values for: ${missing.join(", ")}`);
+      return;
+    }
+
+    setRunStep("running");
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant" as const,
+        content: "Thanks! Starting the Selenium run in the cloud/backend now...",
+      },
+    ]);
+
+    await executeSeleniumRun();
+  };
+
+  const handleCancelRunConfig = () => {
+    setRunStep("idle");
+    setPendingRunCode(null);
+  };
+
   const handleSend = async () => {
     if (!message.trim()) return;
+
+    const userMessage = message;
+    const newMessages = [...messages, { role: "user" as const, content: userMessage }];
+    setMessages(newMessages);
+    setMessage("");
 
     // Require at least one indexed SOP with content before generating scripts
     if (!sopDocuments.some((d) => d.status === "indexed" && d.content)) {
@@ -79,15 +278,10 @@ export const ChatInterface = () => {
       return;
     }
 
-    if (message.length > MAX_MESSAGE_LENGTH) {
+    if (userMessage.length > MAX_MESSAGE_LENGTH) {
       toast.error(`Message too long. Maximum ${MAX_MESSAGE_LENGTH.toLocaleString()} characters allowed.`);
       return;
     }
-
-    const userMessage = message;
-    const newMessages = [...messages, { role: "user" as const, content: userMessage }];
-    setMessages(newMessages);
-    setMessage("");
 
     // Messages are already stored in local state; no persistence needed.
     await saveMessage("user", userMessage);
@@ -119,6 +313,15 @@ export const ChatInterface = () => {
         (data.scripts?.python_selenium || data.scripts?.python || data.script) as string;
       const playwrightScript = (data.scripts?.python_playwright ?? null) as string | null;
 
+      // Extract config fields from the generated Selenium script so the Run form matches it
+      const fields = extractRunConfigFields(pythonScript || "");
+      setRunConfigFields(fields);
+      const initialValues: RunConfigValues = {};
+      fields.forEach((field) => {
+        initialValues[field.name] = field.defaultValue ?? "";
+      });
+      setRunConfig(initialValues);
+
       setGeneratedScripts({ python: pythonScript, playwright: playwrightScript });
 
       const contextInfo = sopContext
@@ -127,7 +330,8 @@ export const ChatInterface = () => {
 
       const assistantMessage = {
         role: "assistant" as const,
-        content: "I've generated a Python script for your automation workflow. Check the code panel on the right to view, copy, or download it!",
+        content:
+          "I've generated a Python script for your automation workflow. Check the code panel below to view, copy, or download it! When you're ready, click Run and I'll ask for the configuration values needed to execute it in the cloud.",
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -222,8 +426,28 @@ export const ChatInterface = () => {
     toast.info("Coming Soon");
   };
 
+  const handleRunRequestedFromViewer = () => {
+    if (!generatedScripts?.python) {
+      toast.error("No Selenium script available to run.");
+      return;
+    }
+
+    setPendingRunCode(generatedScripts.python);
+    setRunOutput(null);
+
+    setRunStep("collecting");
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant" as const,
+        content:
+          "To run this Selenium script in the cloud/backend, please fill in the Required Configs form below and click Submit.",
+      },
+    ]);
+  };
+
   return (
-    <div className="h-[calc(100vh-12rem)] flex gap-4 overflow-hidden">
+    <div className="h-[calc(100vh-12rem)] flex gap-4 overflow-x-hidden overflow-y-auto">
       {/* Chat History Sidebar */}
       {showHistory && (
         <div className="w-64 flex-shrink-0">
@@ -271,10 +495,11 @@ export const ChatInterface = () => {
             <History className="w-4 h-4" />
             {showHistory ? "Hide" : "Show"} History
           </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleUpload}
+            // Only disable while an upload is actively processing
             disabled={isProcessing}
           >
             <Upload className="w-4 h-4" />
@@ -316,6 +541,60 @@ export const ChatInterface = () => {
           </div>
         )}
 
+        {/* Required Configs form for cloud run */}
+        {runStep === "collecting" && (
+          <Card className="mt-2 bg-card/60 border-border/60 p-4 space-y-3">
+            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+              <h3 className="text-sm font-semibold">Required Configs</h3>
+              <p className="text-[11px] text-muted-foreground">
+                These values will be injected into the generated Selenium script when running in the cloud/backend.
+              </p>
+            </div>
+            <form className="space-y-3" onSubmit={handleSubmitRunConfig}>
+              {/* Buttons first so they are always visible at the top of the card */}
+              <div className="flex gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCancelRunConfig}
+                  disabled={isRunExecuting}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" variant="premium" size="sm" disabled={isRunExecuting}>
+                  {isRunExecuting ? "Running..." : "Submit & Run"}
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {runConfigFields.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No configuration constants were detected in this script.
+                  </p>
+                ) : (
+                  runConfigFields.map((field) => (
+                    <div key={field.name} className="space-y-1">
+                      <Label htmlFor={`config-${field.name}`} className="text-xs">
+                        {field.name}
+                      </Label>
+                      <Input
+                        id={`config-${field.name}`}
+                        placeholder={field.defaultValue || "Enter value"}
+                        value={runConfig[field.name] ?? ""}
+                        onChange={(e) =>
+                          setRunConfig((prev) => ({ ...prev, [field.name]: e.target.value }))
+                        }
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            </form>
+          </Card>
+        )}
+
         {/* Input Area */}
         <div className="flex gap-2 mt-2">
           <Textarea
@@ -342,6 +621,9 @@ export const ChatInterface = () => {
           <CodeViewer
             pythonCode={generatedScripts.python}
             playwrightCode={generatedScripts.playwright ?? undefined}
+            onRunRequested={handleRunRequestedFromViewer}
+            isRunning={isRunExecuting}
+            runOutput={runOutput}
           />
         ) : (
           <Card className="h-full flex items-center justify-center bg-card/30 backdrop-blur-sm border-border/50 border-dashed">

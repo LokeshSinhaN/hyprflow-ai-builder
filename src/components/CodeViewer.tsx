@@ -4,19 +4,31 @@ import { Button } from "@/components/ui/button";
 import { Copy, Download, Play, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Highlight, themes } from "prism-react-renderer";
-import { supabase } from "@/integrations/supabase/client";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+
+interface RunOutput {
+  stdout: string;
+  stderr: string;
+  error?: string;
+}
 
 interface CodeViewerProps {
   pythonCode: string;
   playwrightCode?: string | null;
+  onRunRequested?: () => void;
+  isRunning?: boolean;
+  runOutput?: RunOutput | null;
 }
 
-export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
+export const CodeViewer = ({
+  pythonCode,
+  playwrightCode,
+  onRunRequested,
+  isRunning = false,
+  runOutput = null,
+}: CodeViewerProps) => {
   const [activeTab, setActiveTab] = useState<"python" | "playwright">("python");
-  const [isRunning, setIsRunning] = useState(false);
-  const [output, setOutput] = useState<{ stdout: string; stderr: string; error?: string } | null>(null);
   const [showOutput, setShowOutput] = useState(false);
 
   const currentCode =
@@ -47,48 +59,19 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
     toast.success("Script downloaded!");
   };
 
-  const handleRun = async () => {
+  const handleRunClick = () => {
     if (activeTab !== "python") {
-      toast.error("Execution is only supported for the Selenium Python script. Switch to the Python tab to run.");
+      toast.error("Cloud run is only available for the Selenium Python script. Switch to the Python tab to run.");
       return;
     }
 
-    setIsRunning(true);
-    setOutput(null);
-    setShowOutput(true);
-    
-    try {
-      const { data, error } = await supabase.functions.invoke('execute-python', {
-        body: { code: pythonCode }
-      });
-
-      if (error) throw error;
-
-      if (data.error) {
-        setOutput({
-          stdout: data.stdout || '',
-          stderr: data.stderr || '',
-          error: data.error
-        });
-        toast.error("Script execution failed");
-      } else {
-        setOutput({
-          stdout: data.stdout || '',
-          stderr: data.stderr || ''
-        });
-        toast.success("Script executed successfully!");
-      }
-    } catch (error) {
-      console.error("Error running script:", error);
-      setOutput({
-        stdout: '',
-        stderr: '',
-        error: error instanceof Error ? error.message : "Failed to execute script"
-      });
-      toast.error("Failed to execute script");
-    } finally {
-      setIsRunning(false);
+    if (!onRunRequested) {
+      toast.error("Run handler is not configured.");
+      return;
     }
+
+    setShowOutput(true);
+    onRunRequested();
   };
 
   return (
@@ -144,7 +127,7 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
           <Button
             variant="premium"
             size="sm"
-            onClick={handleRun}
+            onClick={handleRunClick}
             disabled={isRunning}
           >
             {isRunning ? (
@@ -189,7 +172,7 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
         </div>
       </Card>
 
-      {output && (
+      {runOutput && (
         <Collapsible open={showOutput} onOpenChange={setShowOutput}>
           <Card className="bg-card/50 backdrop-blur-sm border-border/50">
             <CollapsibleTrigger asChild>
@@ -200,31 +183,31 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="p-4 pt-0 space-y-3">
-                {output.error && (
+                {runOutput.error && (
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-destructive">Error:</h3>
                     <pre className="text-xs bg-destructive/10 text-destructive p-3 rounded-md overflow-x-auto">
-                      {output.error}
+                      {runOutput.error}
                     </pre>
                   </div>
                 )}
-                {output.stdout && (
+                {runOutput.stdout && (
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-green-500">Output:</h3>
                     <pre className="text-xs bg-card/50 p-3 rounded-md overflow-x-auto text-muted-foreground">
-                      {output.stdout}
+                      {runOutput.stdout}
                     </pre>
                   </div>
                 )}
-                {output.stderr && (
+                {runOutput.stderr && (
                   <div className="space-y-2">
                     <h3 className="text-sm font-semibold text-yellow-500">Warnings/Errors:</h3>
                     <pre className="text-xs bg-yellow-500/10 text-yellow-500 p-3 rounded-md overflow-x-auto">
-                      {output.stderr}
+                      {runOutput.stderr}
                     </pre>
                   </div>
                 )}
-                {!output.stdout && !output.stderr && !output.error && (
+                {!runOutput.stdout && !runOutput.stderr && !runOutput.error && (
                   <p className="text-sm text-muted-foreground">No output</p>
                 )}
               </div>
