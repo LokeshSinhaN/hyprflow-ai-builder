@@ -29,6 +29,7 @@ export const ChatInterface = () => {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>("local-conversation");
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
   const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
+  const [sopDocuments, setSopDocuments] = useState<SOPDocument[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,7 +43,13 @@ export const ChatInterface = () => {
 
   const handleDeleteSOP = (sopId: string) => {
     // Local-only delete; we don't touch the database in dev mode.
-    setSopDocuments((prev) => prev.filter((doc) => doc.id !== sopId));
+    setSopDocuments((prev) => {
+      const updated = prev.filter((doc) => doc.id !== sopId);
+      if (updated.length === 0) {
+        setUploadedDocument(null);
+      }
+      return updated;
+    });
     toast.success("SOP removed from current session");
   };
 
@@ -193,6 +200,7 @@ export const ChatInterface = () => {
     };
 
     setSopDocuments((prev) => [newDoc, ...prev]);
+    setUploadedDocument(newDoc.title);
 
     // Set suggested message
     setMessage(
@@ -285,8 +293,31 @@ export const ChatInterface = () => {
           </Button>
         </div>
 
+        {/* Uploaded SOPs List */}
+        {sopDocuments.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>Uploaded SOPs (this session):</span>
+            {sopDocuments.map((doc) => (
+              <Badge
+                key={doc.id}
+                variant="secondary"
+                className="flex items-center gap-2 max-w-xs"
+              >
+                <span className="truncate">{doc.title}</span>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteSOP(doc.id)}
+                  className="text-[10px] uppercase tracking-wide hover:text-destructive"
+                >
+                  Remove
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+
         {/* Input Area */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 mt-2">
           <Textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}

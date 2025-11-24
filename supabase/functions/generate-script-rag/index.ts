@@ -37,13 +37,16 @@ ${sopContext}
 === END SOP ===\n`
       : "";
 
-    const systemPrompt = `You are an expert automation engineer specializing in web automation and RPA. Generate TWO complete, production-ready Python automation scripts based on the provided SOP workflow.
+    const systemPrompt = `You are an expert web automation engineer specializing in browser-based RPA.
+Generate TWO clear and well-structured Python automation scripts that implement only the in-browser steps of the SOP or user workflow.
 
-${contextSection ? "CRITICAL INSTRUCTIONS:" : ""}
-${contextSection ? "- A COMPLETE SOP workflow is provided above. You MUST follow ALL steps in the EXACT order they appear." : ""}
-${contextSection ? "- Map each SOP step to corresponding automation code with comments referencing step numbers." : ""}
-${contextSection ? "- Preserve all technical details: URLs, selectors, field names, data values, wait times." : ""}
-${contextSection ? "- If the SOP mentions specific timing or delays, implement them exactly." : ""}
+${contextSection ? "CRITICAL: Use the SOP content above as the source of truth for the browser steps." : ""}
+
+BROWSER-SCOPE REQUIREMENTS:
+- Implement only actions that happen inside the browser: navigation, clicks, typing, selecting options, reading visible text, taking screenshots, and triggering downloads/prints from the UI.
+- Do NOT write code that parses or reads downloaded files (PDF/Excel/CSV), writes to the local filesystem, updates trackers/databases, calls external APIs, or performs other non-browser business logic.
+- When the SOP describes out-of-browser work (for example: "parse the PDF and update the master tracker"), represent that work only as high-level comments such as "# TODO: parse downloaded PDF and update tracker" without implementing it.
+- Preserve important technical details from the SOP that affect browser behavior: URLs, form fields, button labels, selectors, wait conditions, and explicit timings.
 
 Return your response in this EXACT format (do not deviate):
 
@@ -55,84 +58,32 @@ Return your response in this EXACT format (do not deviate):
 [Complete Python script using Playwright]
 === END_PYTHON_PLAYWRIGHT_SCRIPT ===
 
-REQUIREMENTS FOR BOTH SCRIPTS:
-1. **Complete and executable** - include all necessary imports, setup, and teardown
-2. **Robust error handling** - try/except blocks, proper logging, graceful failures
-3. **Explicit waits** - use WebDriverWait/playwright waits instead of time.sleep()
-4. **Clear structure** - organize code into functions for each major step
-5. **Production-ready** - add configuration, environment variables, and comments
-6. **Sequential flow** - ${contextSection ? "Follow SOP steps in exact order with numbered comments (# Step 1, # Step 2, etc.)" : "Implement logical automation steps"}
+GENERAL CODE STYLE FOR BOTH SCRIPTS:
+- Organize the code into small functions, one per major browser step (e.g. login, open_remittance_page, click_clearinghouse_connection_tab, open_target_file_link).
+- At the top of each function, add a short comment explaining what the step does and, if applicable, which SOP step it corresponds to.
+- Include a small configuration section (constants) for base URLs, credentials/placeholders, and any reused selectors.
+- Use clear variable names and avoid deeply nested logic where possible.
 
 PYTHON SELENIUM SCRIPT SPECIFICS:
-- Use Python with Selenium WebDriver
-- Import: from selenium import webdriver, from selenium.webdriver.common.by import By
-- Import: from selenium.webdriver.support.ui import WebDriverWait
-- Import: from selenium.webdriver.support import expected_conditions as EC
-- Use explicit waits: WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "element_id")))
-- Proper exception handling with specific Selenium exceptions
-- Use ChromeDriver or compatible driver
-- Close browser in finally block
-- Example structure:
-  \`\`\`python
-  from selenium import webdriver
-  from selenium.webdriver.common.by import By
-  from selenium.webdriver.support.ui import WebDriverWait
-  from selenium.webdriver.support import expected_conditions as EC
-  import logging
-  
-  def main():
-      driver = None
-      try:
-          driver = webdriver.Chrome()
-          # automation code here
-      except Exception as e:
-          logging.error(f"Error: {e}")
-      finally:
-          if driver:
-              driver.quit()
-  
-  if __name__ == "__main__":
-      main()
-  \`\`\`
+- Use Selenium WebDriver with Chrome (or a generic driver configuration).
+- Use explicit waits via WebDriverWait and expected_conditions instead of time.sleep().
+- Catch common Selenium exceptions where appropriate and log a helpful message.
+- Ensure the browser is closed in a finally block.
 
 PYTHON PLAYWRIGHT SCRIPT SPECIFICS:
-- Use Python with Playwright library
-- Import: from playwright.sync_api import sync_playwright
-- Use synchronous API (sync_playwright) for simpler code
-- Use built-in waits: page.wait_for_selector(), page.wait_for_load_state()
-- Proper error handling with try/except
-- Close browser and context properly
-- Example structure:
-  \`\`\`python
-  from playwright.sync_api import sync_playwright
-  import logging
-  
-  def main():
-      with sync_playwright() as p:
-          browser = None
-          try:
-              browser = p.chromium.launch(headless=False)
-              context = browser.new_context()
-              page = context.new_page()
-              # automation code here
-          except Exception as e:
-              logging.error(f"Error: {e}")
-          finally:
-              if browser:
-                  browser.close()
-  
-  if __name__ == "__main__":
-      main()
-  \`\`\`
+- Use the synchronous API: from playwright.sync_api import sync_playwright.
+- Use Playwright's built-in waiting (page.wait_for_load_state, page.wait_for_selector, locator-based waits) instead of time.sleep().
+- Ensure browser and context are closed in a finally block.
 
-IMPORTANT: Both scripts should accomplish the same automation task but using different libraries (Selenium vs Playwright).`;
+IMPORTANT: Both scripts should accomplish the same browser workflow (up to the point where any out-of-browser work would begin), but using different libraries (Selenium vs Playwright).`;
 
     const userPrompt = `${contextSection}
 ---
 
 **User Request:** ${message}
 
-Generate both Python Selenium and Python Playwright automation scripts that fulfill this request${contextSection ? " while strictly following the SOP workflow provided above" : ""}.`;
+Generate both Python Selenium and Python Playwright scripts that cover only the in-browser steps of this workflow.
+Ignore or leave TODO-style comments for any steps that require parsing downloaded files, updating trackers, or other non-browser work.${contextSection ? " Follow the order of browser steps as they appear in the SOP above." : ""}`;
 
     console.log("Calling Gemini 2.5 Flash with full SOP context...");
     console.log(`Context length: ${sopContext.length} characters`);
