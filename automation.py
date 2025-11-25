@@ -5,6 +5,7 @@ from supabase import create_client, Client
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service  # <--- Added Import
+from selenium.common.exceptions import WebDriverException
 from webdriver_manager.chrome import ChromeDriverManager
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -64,6 +65,8 @@ def main(job_id: str):
             "driver": driver,
             "log": log,
             "capture_screenshot": capture_screenshot,
+            "webdriver": webdriver,
+            "WebDriverException": WebDriverException,
             "__name__": "__main__",
         }
         exec(script, exec_globals, {})
