@@ -38,7 +38,8 @@ def ensure_bucket(bucket: str) -> None:
 
     if not any(_bucket_name(b) == bucket for b in buckets):
         # Create as public so get_public_url works without signed URLs.
-        supabase.storage.create_bucket(bucket, public=True)
+        # storage3 expects options as a second positional argument.
+        supabase.storage.create_bucket(bucket, {"public": True})
 
 def upload_screenshot(job_id: str, path: str) -> str:
     bucket = BUCKET_NAME
