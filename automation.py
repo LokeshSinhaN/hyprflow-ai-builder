@@ -55,6 +55,23 @@ def main(job_id: str):
 
         webdriver.Chrome = _reuse_existing_driver  # type: ignore[assignment]
 
+        # Wrap driver.quit so scripts that call it still produce a final screenshot
+        # and do not crash the runner.
+        original_quit = driver.quit
+
+        def _wrapped_quit(*_args, **_kwargs):
+            try:
+                capture_screenshot("before-quit")
+            except Exception as e:  # pragma: no cover - best-effort logging only
+                print(f"Error capturing screenshot before quit: {e}", flush=True)
+            try:
+                return original_quit(*_args, **_kwargs)
+            except Exception as e:  # pragma: no cover - best-effort logging only
+                print(f"Error while quitting driver: {e}", flush=True)
+                return None
+
+        driver.quit = _wrapped_quit  # type: ignore[assignment]
+
         # Helper exposed to the user script for structured logging
         def log(msg: str):
             print(msg, flush=True)
@@ -64,8 +81,16 @@ def main(job_id: str):
         def capture_screenshot(label: str | None = None) -> str:
             safe_label = label.replace(" ", "-") if label else "step"
             filename = f"{job_id}-{safe_label}-{datetime.utcnow().isoformat()}.png"
-            driver.save_screenshot(filename)
-            return upload_screenshot(job_id, filename)
+            try:
+                driver.save_screenshot(filename)
+            except Exception as e:
+                log(f"Failed to capture screenshot '{safe_label}': {e}")
+                return ""
+            try:
+                return upload_screenshot(job_id, filename)
+            except Exception as e:
+                log(f"Failed to upload screenshot '{safe_label}': {e}")
+                return ""
 
         # Execute the generated script as if it were run as __main__ so that
         # "if __name__ == '__main__':" blocks are executed in the cloud run.
