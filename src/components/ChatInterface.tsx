@@ -201,34 +201,80 @@ export const ChatInterface = () => {
     setRunOutput(null);
 
     try {
-      const { data, error } = await supabase.functions.invoke("execute-python", {
-        body: { code: configuredCode },
+      // Call new start-selenium-job edge function which enqueues work for GitHub Actions
+      const { data, error } = await supabase.functions.invoke("start-selenium-job", {
+        body: { script: configuredCode },
       });
 
       if (error) throw error;
-
-      if (data.error) {
-        setRunOutput({
-          stdout: data.stdout || "",
-          stderr: data.stderr || "",
-          error: data.error,
-        });
-        toast.error("Script execution failed");
-      } else {
-        setRunOutput({
-          stdout: data.stdout || "",
-          stderr: data.stderr || "",
-        });
-        toast.success("Script executed successfully!");
+      const jobId = data?.jobId as string | undefined;
+      if (!jobId) {
+        throw new Error("start-selenium-job did not return a jobId");
       }
+
+      toast.info(`Selenium job queued in cloud (jobId: ${jobId})`);
+
+      // Simple polling loop for job status so we don't depend on Realtime setup
+      const pollJob = async (attempt = 0): Promise<void> => {
+        if (attempt > 60) {
+          setRunOutput({
+            stdout: "",
+            stderr: "",
+            error: "Timed out waiting for cloud job to finish.",
+          });
+          toast.error("Timed out waiting for cloud job to finish.");
+          return;
+        }
+
+        const { data: job, error: jobError } = await supabase
+          .from("automation_jobs")
+          .select("status,error_message,latest_screenshot_url")
+          .eq("id", jobId)
+          .single();
+
+        if (jobError) {
+          console.error("Error polling automation_jobs:", jobError);
+          setRunOutput({ stdout: "", stderr: "", error: jobError.message ?? "Failed to poll job status" });
+          toast.error("Failed to poll job status");
+          return;
+        }
+
+        const status = job.status as string;
+        if (status === "queued" || status === "running") {
+          setRunOutput({
+            stdout: `Status: ${status}`,
+            stderr: "",
+          });
+          // Wait 2 seconds and poll again
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return pollJob(attempt + 1);
+        }
+
+        if (status === "completed") {
+          setRunOutput({
+            stdout: "Cloud job completed successfully.",
+            stderr: "",
+          });
+          toast.success("Cloud Selenium job completed successfully!");
+        } else {
+          setRunOutput({
+            stdout: "",
+            stderr: "",
+            error: job.error_message || `Cloud job failed with status: ${status}`,
+          });
+          toast.error("Cloud Selenium job failed");
+        }
+      };
+
+      await pollJob();
     } catch (error) {
-      console.error("Error running Selenium script:", error);
+      console.error("Error running Selenium script via cloud job:", error);
       setRunOutput({
         stdout: "",
         stderr: "",
-        error: error instanceof Error ? error.message : "Failed to execute script",
+        error: error instanceof Error ? error.message : "Failed to enqueue or monitor cloud job",
       });
-      toast.error("Failed to execute script");
+      toast.error("Failed to start cloud Selenium job");
     } finally {
       setIsRunExecuting(false);
       setRunStep("idle");
