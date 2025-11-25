@@ -10,13 +10,39 @@ from webdriver_manager.chrome import ChromeDriverManager
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
+# Bucket used to store automation screenshots. Can be overridden via env.
+BUCKET_NAME = os.getenv("SUPABASE_SCREENSHOT_BUCKET", "automation-screenshots")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def update_job(job_id: str, **fields):
     supabase.table("automation_jobs").update(fields).eq("id", job_id).execute()
 
+def ensure_bucket(bucket: str) -> None:
+    """Ensure the given storage bucket exists.
+
+    In GitHub Actions we may be pointed at a fresh Supabase project where the
+    expected bucket was never created. This makes the script resilient by
+    creating the bucket on first use.
+    """
+    try:
+        buckets = supabase.storage.list_buckets()
+    except Exception:
+        # If listing fails for some reason, just return and let upload surface
+        # a more useful error rather than hiding it here.
+        return
+
+    def _bucket_name(b):
+        # Handles both dicts and objects returned by storage3.
+        return getattr(b, "name", b.get("name") if isinstance(b, dict) else None)
+
+    if not any(_bucket_name(b) == bucket for b in buckets):
+        # Create as public so get_public_url works without signed URLs.
+        supabase.storage.create_bucket(bucket, public=True)
+
 def upload_screenshot(job_id: str, path: str) -> str:
-    bucket = "automation-screenshots"
+    bucket = BUCKET_NAME
+    ensure_bucket(bucket)
     storage_path = f"{job_id}/{os.path.basename(path)}"
     with open(path, "rb") as f:
         supabase.storage.from_(bucket).upload(storage_path, f, {"upsert": "true"})
