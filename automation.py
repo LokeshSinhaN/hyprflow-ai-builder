@@ -47,6 +47,14 @@ def main(job_id: str):
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
 
+        # Ensure any webdriver.Chrome(...) calls inside the generated script
+        # reuse this pre-configured driver instead of trying to start new
+        # Chrome sessions (which often fail in CI environments).
+        def _reuse_existing_driver(*_args, **_kwargs):
+            return driver
+
+        webdriver.Chrome = _reuse_existing_driver  # type: ignore[assignment]
+
         # Helper exposed to the user script for structured logging
         def log(msg: str):
             print(msg, flush=True)
