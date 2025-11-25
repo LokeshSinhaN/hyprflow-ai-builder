@@ -4,6 +4,7 @@ from datetime import datetime
 from supabase import create_client, Client
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service  # <--- Added Import
 from webdriver_manager.chrome import ChromeDriverManager
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -38,7 +39,11 @@ def main(job_id: str):
 
     driver = None
     try:
-        driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
+        # --- FIXED BLOCK START ---
+        # Use the Service class to pass the executable path
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+        # --- FIXED BLOCK END ---
 
         # Provide driver + helper log to the script's namespace
         def log(msg: str):
