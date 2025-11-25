@@ -18,7 +18,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install selenium supabase-py webdriver-manager
+          pip install selenium supabase webdriver-manager
 
       - name: Run Selenium job
         env:
