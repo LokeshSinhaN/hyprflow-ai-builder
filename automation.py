@@ -28,7 +28,7 @@ def upload_screenshot(job_id: str, path: str) -> str:
     return public_url
 
 def main(job_id: str):
-    # 1) Fetch script from Supabase
+    # 1) Fetch script from Supabase (already has user config values injected)
     res = supabase.table("automation_jobs").select("script").eq("id", job_id).single().execute()
     script = res.data["script"]
 
@@ -42,26 +42,40 @@ def main(job_id: str):
 
     driver = None
     try:
-        # --- FIXED BLOCK START ---
         # Use the Service class to pass the executable path
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
-        # --- FIXED BLOCK END ---
 
-        # Provide driver + helper log to the script's namespace
+        # Helper exposed to the user script for structured logging
         def log(msg: str):
             print(msg, flush=True)
 
-        exec_globals = {"driver": driver, "log": log}
+        # Helper exposed to the user script so it can push screenshots mid-run.
+        # Returns the public URL that the frontend can display.
+        def capture_screenshot(label: str | None = None) -> str:
+            safe_label = label.replace(" ", "-") if label else "step"
+            filename = f"{job_id}-{safe_label}-{datetime.utcnow().isoformat()}.png"
+            driver.save_screenshot(filename)
+            return upload_screenshot(job_id, filename)
+
+        # Execute the generated script as if it were run as __main__ so that
+        # "if __name__ == '__main__':" blocks are executed in the cloud run.
+        exec_globals = {
+            "driver": driver,
+            "log": log,
+            "capture_screenshot": capture_screenshot,
+            "__name__": "__main__",
+        }
         exec(script, exec_globals, {})
 
-        # Optional: always capture at least one screenshot
-        screenshot_name = f"{job_id}-{datetime.utcnow().isoformat()}.png"
-        driver.save_screenshot(screenshot_name)
-        upload_screenshot(job_id, screenshot_name)
+        # Always capture a final screenshot so the UI has at least one frame
+        # from the end of the run, even if the script never calls
+        # capture_screenshot() itself.
+        capture_screenshot("final")
 
         update_job(job_id, status="completed", error_message=None)
     except Exception as e:
+        # Bubble errors back to the UI via automation_jobs.error_message
         update_job(job_id, status="failed", error_message=str(e))
         raise
     finally:
