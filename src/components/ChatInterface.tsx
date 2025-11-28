@@ -128,6 +128,7 @@ export const ChatInterface = () => {
   const [pendingRunCode, setPendingRunCode] = useState<string | null>(null);
   const [runOutput, setRunOutput] = useState<RunOutput | null>(null);
   const [isRunExecuting, setIsRunExecuting] = useState(false);
+  const [latestScreenshotUrl, setLatestScreenshotUrl] = useState<string | null>(null);
 
   // In auth-free dev mode, conversations and SOPs are kept entirely in local state.
   useEffect(() => {
@@ -199,6 +200,7 @@ export const ChatInterface = () => {
 
     setIsRunExecuting(true);
     setRunOutput(null);
+    setLatestScreenshotUrl(null);
 
     try {
       // Call new start-selenium-job edge function which enqueues work for GitHub Actions
@@ -215,8 +217,11 @@ export const ChatInterface = () => {
       toast.info(`Selenium job queued in cloud (jobId: ${jobId})`);
 
       // Simple polling loop for job status so we don't depend on Realtime setup
+      // On a cold Render free instance, startup alone can take ~60s, and the
+      // Selenium job itself may take another 60–120s. Give the job up to
+      // ~5 minutes (150 attempts * 2s) before declaring a timeout.
       const pollJob = async (attempt = 0): Promise<void> => {
-        if (attempt > 60) {
+        if (attempt > 150) {
           setRunOutput({
             stdout: "",
             stderr: "",
@@ -237,6 +242,11 @@ export const ChatInterface = () => {
           setRunOutput({ stdout: "", stderr: "", error: jobError.message ?? "Failed to poll job status" });
           toast.error("Failed to poll job status");
           return;
+        }
+
+        const latestUrl = (job?.latest_screenshot_url as string | null) ?? null;
+        if (latestUrl) {
+          setLatestScreenshotUrl(latestUrl);
         }
 
         const status = job.status as string;
@@ -662,15 +672,34 @@ export const ChatInterface = () => {
       </div>
 
       {/* Right Panel - Code Viewer */}
-      <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col gap-3">
         {generatedScripts ? (
-          <CodeViewer
-            pythonCode={generatedScripts.python}
-            playwrightCode={generatedScripts.playwright ?? undefined}
-            onRunRequested={handleRunRequestedFromViewer}
-            isRunning={isRunExecuting}
-            runOutput={runOutput}
-          />
+          <>
+            <CodeViewer
+              pythonCode={generatedScripts.python}
+              playwrightCode={generatedScripts.playwright ?? undefined}
+              onRunRequested={handleRunRequestedFromViewer}
+              isRunning={isRunExecuting}
+              runOutput={runOutput}
+            />
+            {latestScreenshotUrl && (
+              <Card className="bg-card/50 backdrop-blur-sm border-border/50 overflow-hidden">
+                <div className="p-3 border-b border-border/40 flex items-center justify-between">
+                  <span className="text-xs font-semibold">Latest Cloud Screenshot</span>
+                  <Badge variant="outline" className="text-[10px]">
+                    Live from backend run
+                  </Badge>
+                </div>
+                <div className="max-h-[320px] overflow-auto bg-background flex items-center justify-center">
+                  <img
+                    src={latestScreenshotUrl}
+                    alt="Latest Selenium cloud run screenshot"
+                    className="max-h-[300px] w-full object-contain"
+                  />
+                </div>
+              </Card>
+            )}
+          </>
         ) : (
           <Card className="h-full flex items-center justify-center bg-card/30 backdrop-blur-sm border-border/50 border-dashed">
             <div className="text-center text-muted-foreground p-8">

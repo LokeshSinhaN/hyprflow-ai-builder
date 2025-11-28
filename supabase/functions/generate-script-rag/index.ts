@@ -96,11 +96,14 @@ GENERAL CODE STYLE FOR BOTH SCRIPTS:
 - Do NOT read configuration from environment variables (no os.getenv, no os.environ). Instead, declare plain Python constants with clear placeholder values, e.g. INSTAGRAM_USERNAME = "your_instagram_username".
 - Use clear variable names and avoid deeply nested logic where possible.
 
-PYTHON SELENIUM SCRIPT SPECIFICS:
-- Use Selenium WebDriver with Chrome (or a generic driver configuration).
-- Use explicit waits via WebDriverWait and expected_conditions instead of time.sleep().
-- Catch common Selenium exceptions where appropriate and log a helpful message.
-- Ensure the browser is closed in a finally block.
+PYTHON SELENIUM SCRIPT SPECIFICS (MUST WORK IN CLOUD AND LOCALLY):
+- Assume that in the cloud runtime a fully configured Selenium WebDriver instance named driver may be injected into the global namespace, along with optional helpers log(message: str) and capture_screenshot(label: str).
+- Implement def main(): so it first checks for a global driver and reuses it when present. Only create a new webdriver.Chrome(options=...) inside main() when no global driver exists (local execution).
+- Do not import or use webdriver_manager, ChromeDriverManager, or Service from selenium.webdriver.chrome.service. The host runtime is responsible for providing a compatible driver.
+- When creating a local driver, use sensible Chrome options (headless, --no-sandbox, --disable-dev-shm-usage or --disable-gpu) and call driver.quit() only if your code created the driver locally. When using an injected global driver (cloud runtime), do not call driver.quit() or driver.close().
+- Use explicit waits via WebDriverWait and expected_conditions instead of time.sleep(), except for very short sleeps as a last resort.
+- Catch common Selenium exceptions (TimeoutException, NoSuchElementException, WebDriverException) where appropriate and log a helpful message using print() or log() if provided.
+- Do not import or reference the sys module (no sys.exit, no sys.stderr, etc.). Let exceptions propagate so the host runner can record the failure. If capture_screenshot exists in globals, call it at key milestones (for example after login, after navigation to important pages, and in error handlers), always guarding calls like "if 'capture_screenshot' in globals(): capture_screenshot('after-login')" so the script still works when run locally.
 
 PYTHON PLAYWRIGHT SCRIPT SPECIFICS:
 - Use the synchronous API: from playwright.sync_api import sync_playwright.
