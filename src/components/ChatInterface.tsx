@@ -233,7 +233,9 @@ export const ChatInterface = () => {
 
         const { data: job, error: jobError } = await supabase
           .from("automation_jobs")
-          .select("status,error_message,latest_screenshot_url")
+          // Select all columns so we can safely read optional log fields without
+          // causing errors if the schema changes (e.g. stdout/log_output columns).
+          .select("*")
           .eq("id", jobId)
           .single();
 
@@ -260,15 +262,23 @@ export const ChatInterface = () => {
           return pollJob(attempt + 1);
         }
 
+        // Try to surface any textual logs the worker may have stored on the job.
+        const logText =
+          (job?.log_output as string | null) ??
+          (job?.logs as string | null) ??
+          (job?.stdout as string | null) ??
+          (job?.output_text as string | null) ??
+          "";
+
         if (status === "completed") {
           setRunOutput({
-            stdout: "Cloud job completed successfully.",
+            stdout: logText || "Cloud job completed successfully.",
             stderr: "",
           });
           toast.success("Cloud Selenium job completed successfully!");
         } else {
           setRunOutput({
-            stdout: "",
+            stdout: logText,
             stderr: "",
             error: job.error_message || `Cloud job failed with status: ${status}`,
           });

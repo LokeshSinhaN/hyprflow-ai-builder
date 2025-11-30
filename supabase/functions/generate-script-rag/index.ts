@@ -77,6 +77,11 @@ BROWSER-SCOPE REQUIREMENTS:
 - When the SOP describes out-of-browser work (for example: "parse the PDF and update the master tracker"), represent that work only as high-level comments such as "# TODO: parse downloaded PDF and update tracker" without implementing it.
 - Preserve important technical details from the SOP that affect browser behavior: URLs, form fields, button labels, selectors, wait conditions, and explicit timings.
 
+LOGGING & OBSERVABILITY REQUIREMENTS (APPLIES ESPECIALLY TO CLOUD RUNS ON SELENIUM WORKER):
+- For every major step (login, navigation, searches, form submissions, error handling, and logout), emit clear, human-readable log lines to standard output describing what the script is about to do and what actually happened. Examples: "Navigating to Instagram login page...", "Successfully logged in to Instagram.", "Searching for hashtag: #jesus...", "An error occurred during automation: <details>".
+- Prefer a helper like log_step(message: str) that uses the injected log(message) function when available (in cloud runtimes such as the selenium-worker on Render) and falls back to print(message) when running locally. Use this helper consistently instead of bare print() for progress messages.
+- Do not rely on screenshots as the only observable output. Screenshots, when supported, are optional and supplementary; the primary feedback channel must be detailed textual logs on stdout that can be captured by the cloud runner.
+
 Return your response in this EXACT format (do not deviate):
 
 IMPORTANT: DO NOT use Markdown-style triple-backtick code fences (no fenced "python" blocks). Return only plain Python code between the markers.
@@ -102,8 +107,8 @@ PYTHON SELENIUM SCRIPT SPECIFICS (MUST WORK IN CLOUD AND LOCALLY):
 - Do not import or use webdriver_manager, ChromeDriverManager, or Service from selenium.webdriver.chrome.service. The host runtime is responsible for providing a compatible driver.
 - When creating a local driver, use sensible Chrome options (headless, --no-sandbox, --disable-dev-shm-usage or --disable-gpu) and call driver.quit() only if your code created the driver locally. When using an injected global driver (cloud runtime), do not call driver.quit() or driver.close().
 - Use explicit waits via WebDriverWait and expected_conditions instead of time.sleep(), except for very short sleeps as a last resort.
-- Catch common Selenium exceptions (TimeoutException, NoSuchElementException, WebDriverException) where appropriate and log a helpful message using print() or log() if provided.
-- Do not import or reference the sys module (no sys.exit, no sys.stderr, etc.). Let exceptions propagate so the host runner can record the failure. If capture_screenshot exists in globals, call it at key milestones (for example after login, after navigation to important pages, and in error handlers), always guarding calls like "if 'capture_screenshot' in globals(): capture_screenshot('after-login')" so the script still works when run locally.
+- Catch common Selenium exceptions (TimeoutException, NoSuchElementException, WebDriverException) where appropriate and log a helpful message using your logging helper (log_step / log) so that failures are clearly visible in cloud logs.
+- Do not import or reference the sys module (no sys.exit, no sys.stderr, etc.). Let exceptions propagate so the host runner can record the failure. If capture_screenshot exists in globals, you may call it at key milestones (for example after login, after navigation to important pages, and in error handlers), always guarding calls like "if 'capture_screenshot' in globals(): capture_screenshot('after-login')" so the script still works when run locally, but ALWAYS also emit a textual log line describing what the screenshot represents (e.g. "Screenshot captured after login (if implemented)").
 
 PYTHON PLAYWRIGHT SCRIPT SPECIFICS:
 - Use the synchronous API: from playwright.sync_api import sync_playwright.
