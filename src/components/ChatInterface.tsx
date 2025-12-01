@@ -203,15 +203,34 @@ export const ChatInterface = () => {
     setLatestScreenshotUrl(null);
 
     try {
-      // Call new start-selenium-job edge function which enqueues work for GitHub Actions
-      const { data, error } = await supabase.functions.invoke("start-selenium-job", {
-        body: { script: configuredCode },
-      });
+      // Prefer calling a Python Selenium engine when configured (local Docker
+      // or Cloud Run). Fallback to Supabase edge function otherwise.
+      const pythonEngineUrl = import.meta.env.VITE_PYTHON_ENGINE_URL as string | undefined;
 
-      if (error) throw error;
-      const jobId = data?.jobId as string | undefined;
+      let jobId: string | undefined;
+
+      if (pythonEngineUrl) {
+        const resp = await fetch(`${pythonEngineUrl}/jobs/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ script: configuredCode }),
+        });
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(`Python engine error: ${resp.status} - ${text}`);
+        }
+        const json = await resp.json();
+        jobId = json?.jobId as string | undefined;
+      } else {
+        const { data, error } = await supabase.functions.invoke("start-selenium-job", {
+          body: { script: configuredCode },
+        });
+        if (error) throw error;
+        jobId = data?.jobId as string | undefined;
+      }
+
       if (!jobId) {
-        throw new Error("start-selenium-job did not return a jobId");
+        throw new Error("Cloud Selenium runner did not return a jobId");
       }
 
       toast.info(`Selenium job queued in cloud (jobId: ${jobId})`);
@@ -233,7 +252,7 @@ export const ChatInterface = () => {
 
         const { data: job, error: jobError } = await supabase
           .from("automation_jobs")
-          .select("status,error_message,latest_screenshot_url")
+.select("status,error_message,latest_screenshot_url,logs")
           .eq("id", jobId)
           .single();
 
@@ -250,9 +269,11 @@ export const ChatInterface = () => {
         }
 
         const status = job.status as string;
+        const logs = (job?.logs as string | null) ?? "";
+
         if (status === "queued" || status === "running") {
           setRunOutput({
-            stdout: `Status: ${status}`,
+            stdout: logs || `Status: ${status}`,
             stderr: "",
           });
           // Wait 2 seconds and poll again
@@ -262,13 +283,13 @@ export const ChatInterface = () => {
 
         if (status === "completed") {
           setRunOutput({
-            stdout: "Cloud job completed successfully.",
+            stdout: logs || "Cloud job completed successfully.",
             stderr: "",
           });
           toast.success("Cloud Selenium job completed successfully!");
         } else {
           setRunOutput({
-            stdout: "",
+            stdout: logs,
             stderr: "",
             error: job.error_message || `Cloud job failed with status: ${status}`,
           });

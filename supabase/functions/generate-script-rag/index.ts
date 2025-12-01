@@ -103,6 +103,9 @@ PYTHON SELENIUM SCRIPT SPECIFICS (MUST WORK IN CLOUD AND LOCALLY):
 - When creating a local driver, use sensible Chrome options (headless, --no-sandbox, --disable-dev-shm-usage or --disable-gpu) and call driver.quit() only if your code created the driver locally. When using an injected global driver (cloud runtime), do not call driver.quit() or driver.close().
 - Use explicit waits via WebDriverWait and expected_conditions instead of time.sleep(), except for very short sleeps as a last resort.
 - Catch common Selenium exceptions (TimeoutException, NoSuchElementException, WebDriverException) where appropriate and log a helpful message using print() or log() if provided.
+- Always call the helper log(message: str) exactly as log(...). Do not define or use alternate names such as log_step, log_message, step_log, or similar aliases. If you need step-level logging, include the step name in the message string passed to log().
+- Always call the screenshot helper as capture_screenshot(label: str). Do not define or call capture_screenshot_if_available, _capture_screenshot, or any other screenshot helper aliases. Guard calls with "if 'capture_screenshot' in globals(): capture_screenshot('after-login')" so the script still works when run locally.
+- Every helper function you call (for example: navigate_to_login_page, navigate_to_youtube, perform_login, open_target_profile, scroll_feed, etc.) MUST be defined in the same script. Do not reference functions that are not defined.
 - Do not import or reference the sys module (no sys.exit, no sys.stderr, etc.). Let exceptions propagate so the host runner can record the failure. If capture_screenshot exists in globals, call it at key milestones (for example after login, after navigation to important pages, and in error handlers), always guarding calls like "if 'capture_screenshot' in globals(): capture_screenshot('after-login')" so the script still works when run locally.
 
 PYTHON PLAYWRIGHT SCRIPT SPECIFICS:
