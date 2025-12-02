@@ -65,10 +65,13 @@ GENERAL CODE STYLE FOR BOTH SCRIPTS:
 - Use clear variable names and avoid deeply nested logic where possible.
 
 PYTHON SELENIUM SCRIPT SPECIFICS:
-- Use Selenium WebDriver with Chrome (or a generic driver configuration).
+- Use Selenium WebDriver with local Chrome/Chromium and a locally installed chromedriver executable.
+- At the top of the script, define a constant CHROME_DRIVER_PATH (for example r"C:\\path\\to\\chromedriver.exe") and use it with Service(executable_path=CHROME_DRIVER_PATH) when creating webdriver.Chrome.
+- Do NOT use webdriver_manager or any automatic driver download; rely only on the local CHROME_DRIVER_PATH value.
 - Use explicit waits via WebDriverWait and expected_conditions instead of time.sleep().
 - Catch common Selenium exceptions where appropriate and log a helpful message.
 - Ensure the browser is closed in a finally block.
+- Structure the script so a user can copy it into a .py file and run it directly after only updating CHROME_DRIVER_PATH and any credentials/URLs.
 
 PYTHON PLAYWRIGHT SCRIPT SPECIFICS:
 - Use the synchronous API: from playwright.sync_api import sync_playwright.
