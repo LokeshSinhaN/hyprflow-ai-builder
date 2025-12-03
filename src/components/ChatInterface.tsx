@@ -9,6 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const MAX_MESSAGE_LENGTH = 10000;
 
@@ -21,9 +23,82 @@ interface SOPDocument {
   content?: string; // Local-only SOP content for context (not persisted)
 }
 
+type ScriptConfigValues = {
+  username: string;
+  email: string;
+  password: string;
+  websiteUrl: string;
+  chromeDriverPath: string;
+};
+
+const EMPTY_CONFIG: ScriptConfigValues = {
+  username: "",
+  email: "",
+  password: "",
+  websiteUrl: "",
+  chromeDriverPath: "",
+};
+
+const extractConfigFromCode = (code: string): Partial<ScriptConfigValues> => {
+  const matchStringConst = (names: string[]): string | undefined => {
+    for (const name of names) {
+      const regex = new RegExp(`${name}\\s*=\\s*r?['"]([^'"\\n]+)['"]`);
+      const match = code.match(regex);
+      if (match) {
+        return match[1];
+      }
+    }
+    return undefined;
+  };
+
+  return {
+    websiteUrl:
+      matchStringConst(["BASE_URL", "LOGIN_URL", "PORTAL_URL"]) ?? "",
+    chromeDriverPath: matchStringConst(["CHROME_DRIVER_PATH"]) ?? "",
+    username: matchStringConst(["USERNAME"]) ?? "",
+    password: matchStringConst(["PASSWORD"]) ?? "",
+    email: matchStringConst(["EMAIL", "SENDER_EMAIL"]) ?? "",
+  };
+};
+
+const applyConfigToCode = (
+  code: string,
+  config: ScriptConfigValues,
+): string => {
+  let updated = code;
+
+  const setConst = (names: string[], value: string, options?: { raw?: boolean }) => {
+    if (!value) return;
+    const raw = options?.raw ?? false;
+
+    const escaped = raw
+      ? value.replace(/\\/g, "\\\\")
+      : value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+    for (const name of names) {
+      const pattern = new RegExp(`${name}\\s*=\\s*r?['"][^'"]*['"]`);
+      if (pattern.test(updated)) {
+        const replacement = raw ? `${name} = r"${escaped}"` : `${name} = "${escaped}"`;
+        updated = updated.replace(pattern, replacement);
+        return;
+      }
+    }
+  };
+
+  setConst(["CHROME_DRIVER_PATH"], config.chromeDriverPath, { raw: true });
+  setConst(["BASE_URL", "LOGIN_URL", "PORTAL_URL"], config.websiteUrl);
+  setConst(["USERNAME"], config.username);
+  setConst(["PASSWORD"], config.password);
+  setConst(["EMAIL", "SENDER_EMAIL"], config.email);
+
+  return updated;
+};
+
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
   const [generatedScripts, setGeneratedScripts] =
+    useState<{ python: string; playwright?: string | null } | null>(null);
+  const [baseScripts, setBaseScripts] =
     useState<{ python: string; playwright?: string | null } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>("local-conversation");
@@ -31,6 +106,8 @@ export const ChatInterface = () => {
   const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
   const [sopDocuments, setSopDocuments] = useState<SOPDocument[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showConfigForm, setShowConfigForm] = useState(false);
+  const [configValues, setConfigValues] = useState<ScriptConfigValues>(EMPTY_CONFIG);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // In auth-free dev mode, conversations and SOPs are kept entirely in local state.
@@ -58,6 +135,9 @@ export const ChatInterface = () => {
     setCurrentConversationId("local-conversation-" + Date.now().toString());
     setMessages([]);
     setGeneratedScripts(null);
+    setBaseScripts(null);
+    setShowConfigForm(false);
+    setConfigValues(EMPTY_CONFIG);
   };
 
   const loadConversation = async (_conversationId: string) => {
@@ -119,7 +199,11 @@ export const ChatInterface = () => {
         (data.scripts?.python_selenium || data.scripts?.python || data.script) as string;
       const playwrightScript = (data.scripts?.python_playwright ?? null) as string | null;
 
-      setGeneratedScripts({ python: pythonScript, playwright: playwrightScript });
+      const scripts = { python: pythonScript, playwright: playwrightScript };
+      setBaseScripts(scripts);
+      setGeneratedScripts(scripts);
+      setShowConfigForm(false);
+      setConfigValues(EMPTY_CONFIG);
 
       const contextInfo = sopContext
         ? " I used your uploaded SOP documents as additional context."
@@ -217,6 +301,39 @@ export const ChatInterface = () => {
   }
 };
 
+  const handleOpenConfig = () => {
+    const base = baseScripts ?? generatedScripts;
+
+    if (!base || !base.python) {
+      toast.error("Generate a script first, then click Run to configure it.");
+      return;
+    }
+
+    const detected = extractConfigFromCode(base.python);
+    setConfigValues((prev) => ({
+      ...prev,
+      ...detected,
+    }));
+    setShowConfigForm(true);
+  };
+
+  const handleApplyConfig = () => {
+    const base = baseScripts ?? generatedScripts;
+
+    if (!base || !base.python) {
+      toast.error("No script available to configure.");
+      return;
+    }
+
+    const updatedPython = applyConfigToCode(base.python, configValues);
+    const updatedPlaywright = base.playwright
+      ? applyConfigToCode(base.playwright, configValues)
+      : base.playwright;
+
+    setGeneratedScripts({ python: updatedPython, playwright: updatedPlaywright ?? null });
+    setShowConfigForm(false);
+    toast.success("Configuration applied. You can now copy or download the updated script.");
+  };
 
   const handleScreenCapture = () => {
     toast.info("Coming Soon");
@@ -260,6 +377,102 @@ export const ChatInterface = () => {
             </Card>
           ))}
         </div>
+
+        {/* Configuration widget triggered from the Run button in the code panel */}
+        {showConfigForm && (
+          <Card className="p-4 space-y-3 bg-card/60 border-accent/40">
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold">Finalize script configuration</h3>
+              <p className="text-xs text-muted-foreground">
+                Provide the values that the LLM cannot know (driver path, portal URL, credentials). These will be
+                injected into the generated script so you can copy-paste and run it locally without editing.
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="config-website">Website / portal URL</Label>
+                <Input
+                  id="config-website"
+                  placeholder="https://your-portal-url.com/login"
+                  value={configValues.websiteUrl}
+                  onChange={(e) =>
+                    setConfigValues((prev) => ({
+                      ...prev,
+                      websiteUrl: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="config-driver">ChromeDriver path</Label>
+                <Input
+                  id="config-driver"
+                  placeholder="C:\\Path\\To\\chromedriver.exe"
+                  value={configValues.chromeDriverPath}
+                  onChange={(e) =>
+                    setConfigValues((prev) => ({
+                      ...prev,
+                      chromeDriverPath: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="config-username">Username</Label>
+                <Input
+                  id="config-username"
+                  placeholder="portal-username"
+                  value={configValues.username}
+                  onChange={(e) =>
+                    setConfigValues((prev) => ({
+                      ...prev,
+                      username: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="config-email">Email (optional)</Label>
+                <Input
+                  id="config-email"
+                  placeholder="you@example.com"
+                  value={configValues.email}
+                  onChange={(e) =>
+                    setConfigValues((prev) => ({
+                      ...prev,
+                      email: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <Label htmlFor="config-password">Password</Label>
+                <Input
+                  id="config-password"
+                  type="password"
+                  placeholder="Portal password (stored only in your browser)"
+                  value={configValues.password}
+                  onChange={(e) =>
+                    setConfigValues((prev) => ({
+                      ...prev,
+                      password: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" size="sm" onClick={() => setShowConfigForm(false)}>
+                Cancel
+              </Button>
+              <Button variant="premium" size="sm" onClick={handleApplyConfig}>
+                Apply & Update Code
+              </Button>
+            </div>
+          </Card>
+        )}
 
         {/* Action Buttons */}
         <div className="flex gap-2">
@@ -342,6 +555,7 @@ export const ChatInterface = () => {
           <CodeViewer
             pythonCode={generatedScripts.python}
             playwrightCode={generatedScripts.playwright ?? undefined}
+            onRun={handleOpenConfig}
           />
         ) : (
           <Card className="h-full flex items-center justify-center bg-card/30 backdrop-blur-sm border-border/50 border-dashed">

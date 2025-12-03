@@ -1,23 +1,24 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Download, Play, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { Copy, Download, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Highlight, themes } from "prism-react-renderer";
-import { supabase } from "@/integrations/supabase/client";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 
 interface CodeViewerProps {
   pythonCode: string;
   playwrightCode?: string | null;
+  /**
+   * Called when the user clicks the Run button.
+   * The parent component can use this to open a configuration widget
+   * in the chat column and update the script with user-specific values.
+   */
+  onRun?: () => void;
 }
 
-export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
+export const CodeViewer = ({ pythonCode, playwrightCode, onRun }: CodeViewerProps) => {
   const [activeTab, setActiveTab] = useState<"python" | "playwright">("python");
-  const [isRunning, setIsRunning] = useState(false);
-  const [output, setOutput] = useState<{ stdout: string; stderr: string; error?: string } | null>(null);
-  const [showOutput, setShowOutput] = useState(false);
 
   const currentCode =
     activeTab === "python"
@@ -47,48 +48,21 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
     toast.success("Script downloaded!");
   };
 
-  const handleRun = async () => {
-    if (activeTab !== "python") {
-      toast.error("Execution is only supported for the Selenium Python script. Switch to the Python tab to run.");
+  const handleRunClick = () => {
+    if (!onRun) {
+      toast.info(
+        "Use this script by updating the placeholders at the top (driver path, URL, credentials) before running it locally.",
+      );
       return;
     }
 
-    setIsRunning(true);
-    setOutput(null);
-    setShowOutput(true);
-    
-    try {
-      const { data, error } = await supabase.functions.invoke('execute-python', {
-        body: { code: pythonCode }
-      });
-
-      if (error) throw error;
-
-      if (data.error) {
-        setOutput({
-          stdout: data.stdout || '',
-          stderr: data.stderr || '',
-          error: data.error
-        });
-        toast.error("Script execution failed");
-      } else {
-        setOutput({
-          stdout: data.stdout || '',
-          stderr: data.stderr || ''
-        });
-        toast.success("Script executed successfully!");
-      }
-    } catch (error) {
-      console.error("Error running script:", error);
-      setOutput({
-        stdout: '',
-        stderr: '',
-        error: error instanceof Error ? error.message : "Failed to execute script"
-      });
-      toast.error("Failed to execute script");
-    } finally {
-      setIsRunning(false);
+    // Only allow configuring the primary Selenium Python script.
+    if (activeTab !== "python") {
+      toast.error("Configuration is only supported for the Selenium Python script. Switch to the Python tab to continue.");
+      return;
     }
+
+    onRun();
   };
 
   return (
@@ -107,7 +81,7 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
               "h-8 rounded-full px-3 text-xs font-medium transition-all",
               activeTab === "python"
                 ? "bg-gradient-to-r from-accent to-primary text-primary-foreground shadow"
-                : "text-muted-foreground hover:text-foreground"
+                : "text-muted-foreground hover:text-foreground",
             )}
             onClick={() => setActiveTab("python")}
           >
@@ -122,7 +96,7 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
               activeTab === "playwright"
                 ? "bg-gradient-to-r from-accent to-primary text-primary-foreground shadow"
                 : "text-muted-foreground hover:text-foreground",
-              !playwrightCode && "opacity-60 cursor-not-allowed"
+              !playwrightCode && "opacity-60 cursor-not-allowed",
             )}
             onClick={() => playwrightCode && setActiveTab("playwright")}
             disabled={!playwrightCode}
@@ -141,18 +115,9 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
             <Download className="w-4 h-4" />
             Download
           </Button>
-          <Button
-            variant="premium"
-            size="sm"
-            onClick={handleRun}
-            disabled={isRunning}
-          >
-            {isRunning ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Play className="w-4 h-4" />
-            )}
-            {isRunning ? "Running..." : "Run"}
+          <Button variant="premium" size="sm" onClick={handleRunClick}>
+            <Play className="w-4 h-4" />
+            Run
           </Button>
         </div>
       </div>
@@ -188,50 +153,6 @@ export const CodeViewer = ({ pythonCode, playwrightCode }: CodeViewerProps) => {
           </Highlight>
         </div>
       </Card>
-
-      {output && (
-        <Collapsible open={showOutput} onOpenChange={setShowOutput}>
-          <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" className="w-full justify-between p-4">
-                <span className="font-semibold">Execution Output</span>
-                {showOutput ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <div className="p-4 pt-0 space-y-3">
-                {output.error && (
-                  <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-destructive">Error:</h3>
-                    <pre className="text-xs bg-destructive/10 text-destructive p-3 rounded-md overflow-x-auto">
-                      {output.error}
-                    </pre>
-                  </div>
-                )}
-                {output.stdout && (
-                  <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-green-500">Output:</h3>
-                    <pre className="text-xs bg-card/50 p-3 rounded-md overflow-x-auto text-muted-foreground">
-                      {output.stdout}
-                    </pre>
-                  </div>
-                )}
-                {output.stderr && (
-                  <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-yellow-500">Warnings/Errors:</h3>
-                    <pre className="text-xs bg-yellow-500/10 text-yellow-500 p-3 rounded-md overflow-x-auto">
-                      {output.stderr}
-                    </pre>
-                  </div>
-                )}
-                {!output.stdout && !output.stderr && !output.error && (
-                  <p className="text-sm text-muted-foreground">No output</p>
-                )}
-              </div>
-            </CollapsibleContent>
-          </Card>
-        </Collapsible>
-      )}
     </div>
   );
 };
