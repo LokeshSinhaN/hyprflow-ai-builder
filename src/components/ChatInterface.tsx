@@ -23,73 +23,138 @@ interface SOPDocument {
   content?: string; // Local-only SOP content for context (not persisted)
 }
 
-type ScriptConfigValues = {
-  username: string;
-  email: string;
-  password: string;
-  websiteUrl: string;
-  chromeDriverPath: string;
+type ScriptConfigEntry = {
+  key: string;
+  value: string;
+  originalValue: string;
+  inputType: "text" | "password";
 };
 
-const EMPTY_CONFIG: ScriptConfigValues = {
-  username: "",
-  email: "",
-  password: "",
-  websiteUrl: "",
-  chromeDriverPath: "",
+const CONFIG_NAME_KEYWORDS = [
+  "username",
+  "user_name",
+  "password",
+  "email",
+  "mail",
+  "url",
+  "uri",
+  "link",
+  "endpoint",
+  "path",
+  "driver",
+  "directory",
+  "hashtag",
+  "tag",
+  "login",
+  "domain",
+  "account",
+  "profile",
+  "keyword",
+  "search",
+  "timeout",
+  "delay",
+  "wait",
+  "seconds",
+  "limit",
+  "max_",
+  "min_",
+];
+
+const isLikelyConfigVariable = (name: string, value: string): boolean => {
+  const lowerName = name.toLowerCase();
+  if (CONFIG_NAME_KEYWORDS.some((keyword) => lowerName.includes(keyword))) {
+    return true;
+  }
+
+  const lowerValue = value.toLowerCase();
+  if (!lowerValue) return false;
+
+  // Typical placeholder patterns that the LLM uses for unknown values
+  return (
+    lowerValue.includes("your_") ||
+    lowerValue.includes("your ") ||
+    lowerValue.includes("example.com") ||
+    lowerValue.includes("changeme") ||
+    lowerValue.includes("<#") ||
+    lowerValue.startsWith("#")
+  );
 };
 
-const extractConfigFromCode = (code: string): Partial<ScriptConfigValues> => {
-  const matchStringConst = (names: string[]): string | undefined => {
-    for (const name of names) {
-      const regex = new RegExp(`${name}\\s*=\\s*r?['"]([^'"\\n]+)['"]`);
-      const match = code.match(regex);
-      if (match) {
-        return match[1];
-      }
+const detectConfigEntriesFromCode = (code: string): ScriptConfigEntry[] => {
+  // Restrict scanning to the header / configuration section at the top of the file
+  const lines = code.split("\n");
+  const headerLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (
+      trimmed.startsWith("def ") ||
+      trimmed.startsWith("class ") ||
+      trimmed.startsWith("SELECTORS ") ||
+      trimmed.startsWith("# --- Selectors")
+    ) {
+      break;
     }
-    return undefined;
-  };
+    headerLines.push(line);
+  }
 
-  return {
-    websiteUrl:
-      matchStringConst(["BASE_URL", "LOGIN_URL", "PORTAL_URL"]) ?? "",
-    chromeDriverPath: matchStringConst(["CHROME_DRIVER_PATH"]) ?? "",
-    username: matchStringConst(["USERNAME"]) ?? "",
-    password: matchStringConst(["PASSWORD"]) ?? "",
-    email: matchStringConst(["EMAIL", "SENDER_EMAIL"]) ?? "",
-  };
+  const header = headerLines.join("\n");
+  const regex = /^([A-Z_][A-Z0-9_]*)\s*=\s*r?['"]([^'"\n]*)['"]/gm;
+  const entries: ScriptConfigEntry[] = [];
+  const seen = new Set<string>();
+
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(header)) !== null) {
+    const name = match[1];
+    const value = match[2] ?? "";
+
+    if (!name || seen.has(name)) continue;
+    if (!isLikelyConfigVariable(name, value)) continue;
+
+    seen.add(name);
+
+    const lowerName = name.toLowerCase();
+    const lowerValue = value.toLowerCase();
+    const isPasswordLike =
+      lowerName.includes("password") ||
+      lowerName.includes("secret") ||
+      lowerName.includes("token") ||
+      lowerName.endsWith("_key") ||
+      lowerValue.includes("password");
+
+    entries.push({
+      key: name,
+      value,
+      originalValue: value,
+      inputType: isPasswordLike ? "password" : "text",
+    });
+  }
+
+  return entries;
 };
 
-const applyConfigToCode = (
-  code: string,
-  config: ScriptConfigValues,
-): string => {
+const applyConfigEntriesToCode = (code: string, entries: ScriptConfigEntry[]): string => {
   let updated = code;
 
-  const setConst = (names: string[], value: string, options?: { raw?: boolean }) => {
-    if (!value) return;
-    const raw = options?.raw ?? false;
+  for (const entry of entries) {
+    const { key, value } = entry;
+    if (!value) continue;
 
-    const escaped = raw
+    const lowerName = key.toLowerCase();
+    const shouldUseRawString =
+      lowerName.includes("path") || lowerName.includes("dir") || lowerName.includes("driver");
+
+    const escaped = shouldUseRawString
       ? value.replace(/\\/g, "\\\\")
       : value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
-    for (const name of names) {
-      const pattern = new RegExp(`${name}\\s*=\\s*r?['"][^'"]*['"]`);
-      if (pattern.test(updated)) {
-        const replacement = raw ? `${name} = r"${escaped}"` : `${name} = "${escaped}"`;
-        updated = updated.replace(pattern, replacement);
-        return;
-      }
-    }
-  };
+    const pattern = new RegExp(`${key}\\s*=\\s*r?['"][^'"\n]*['"]`);
+    const replacement = shouldUseRawString
+      ? `${key} = r"${escaped}"`
+      : `${key} = "${escaped}"`;
 
-  setConst(["CHROME_DRIVER_PATH"], config.chromeDriverPath, { raw: true });
-  setConst(["BASE_URL", "LOGIN_URL", "PORTAL_URL"], config.websiteUrl);
-  setConst(["USERNAME"], config.username);
-  setConst(["PASSWORD"], config.password);
-  setConst(["EMAIL", "SENDER_EMAIL"], config.email);
+    updated = updated.replace(pattern, replacement);
+  }
 
   return updated;
 };
@@ -107,7 +172,7 @@ export const ChatInterface = () => {
   const [sopDocuments, setSopDocuments] = useState<SOPDocument[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showConfigForm, setShowConfigForm] = useState(false);
-  const [configValues, setConfigValues] = useState<ScriptConfigValues>(EMPTY_CONFIG);
+  const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // In auth-free dev mode, conversations and SOPs are kept entirely in local state.
@@ -137,7 +202,7 @@ export const ChatInterface = () => {
     setGeneratedScripts(null);
     setBaseScripts(null);
     setShowConfigForm(false);
-    setConfigValues(EMPTY_CONFIG);
+    setConfigEntries([]);
   };
 
   const loadConversation = async (_conversationId: string) => {
@@ -203,7 +268,7 @@ export const ChatInterface = () => {
       setBaseScripts(scripts);
       setGeneratedScripts(scripts);
       setShowConfigForm(false);
-      setConfigValues(EMPTY_CONFIG);
+      setConfigEntries([]);
 
       const contextInfo = sopContext
         ? " I used your uploaded SOP documents as additional context."
@@ -309,11 +374,14 @@ export const ChatInterface = () => {
       return;
     }
 
-    const detected = extractConfigFromCode(base.python);
-    setConfigValues((prev) => ({
-      ...prev,
-      ...detected,
-    }));
+    const detected = detectConfigEntriesFromCode(base.python);
+
+    if (detected.length === 0) {
+      toast.info("No configurable values were detected at the top of the script.");
+      return;
+    }
+
+    setConfigEntries(detected);
     setShowConfigForm(true);
   };
 
@@ -325,9 +393,9 @@ export const ChatInterface = () => {
       return;
     }
 
-    const updatedPython = applyConfigToCode(base.python, configValues);
+    const updatedPython = applyConfigEntriesToCode(base.python, configEntries);
     const updatedPlaywright = base.playwright
-      ? applyConfigToCode(base.playwright, configValues)
+      ? applyConfigEntriesToCode(base.playwright, configEntries)
       : base.playwright;
 
     setGeneratedScripts({ python: updatedPython, playwright: updatedPlaywright ?? null });
@@ -378,97 +446,50 @@ export const ChatInterface = () => {
           ))}
         </div>
 
-        {/* Configuration widget triggered from the Run button in the code panel */}
-        {showConfigForm && (
-          <Card className="p-4 space-y-3 bg-card/60 border-accent/40">
-            <div className="space-y-1">
-              <h3 className="text-sm font-semibold">Finalize script configuration</h3>
-              <p className="text-xs text-muted-foreground">
-                Provide the values that the LLM cannot know (driver path, portal URL, credentials). These will be
-                injected into the generated script so you can copy-paste and run it locally without editing.
+        {/* Inline configuration card (appears below uploaded SOPs, above message input) */}
+        {showConfigForm && configEntries.length > 0 && (
+          <Card className="mt-4 p-6 space-y-6 bg-card/60 border-border/60 shadow-sm">
+            <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-accent-foreground/80">
+                  Required Configs
+                </p>
+              </div>
+              <p className="mt-1 md:mt-0 text-[11px] text-muted-foreground md:max-w-md">
+                These values will be injected into the generated Selenium script so that you can copy and run it locally
+                without any manual edits. Only values that the model cannot infer from the SOP (usernames, passwords,
+                URLs, driver paths, hashtags, etc.) are shown here.
               </p>
             </div>
 
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1">
-                <Label htmlFor="config-website">Website / portal URL</Label>
-                <Input
-                  id="config-website"
-                  placeholder="https://your-portal-url.com/login"
-                  value={configValues.websiteUrl}
-                  onChange={(e) =>
-                    setConfigValues((prev) => ({
-                      ...prev,
-                      websiteUrl: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="config-driver">ChromeDriver path</Label>
-                <Input
-                  id="config-driver"
-                  placeholder="C:\\Path\\To\\chromedriver.exe"
-                  value={configValues.chromeDriverPath}
-                  onChange={(e) =>
-                    setConfigValues((prev) => ({
-                      ...prev,
-                      chromeDriverPath: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="config-username">Username</Label>
-                <Input
-                  id="config-username"
-                  placeholder="portal-username"
-                  value={configValues.username}
-                  onChange={(e) =>
-                    setConfigValues((prev) => ({
-                      ...prev,
-                      username: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="config-email">Email (optional)</Label>
-                <Input
-                  id="config-email"
-                  placeholder="you@example.com"
-                  value={configValues.email}
-                  onChange={(e) =>
-                    setConfigValues((prev) => ({
-                      ...prev,
-                      email: e.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div className="space-y-1 md:col-span-2">
-                <Label htmlFor="config-password">Password</Label>
-                <Input
-                  id="config-password"
-                  type="password"
-                  placeholder="Portal password (stored only in your browser)"
-                  value={configValues.password}
-                  onChange={(e) =>
-                    setConfigValues((prev) => ({
-                      ...prev,
-                      password: e.target.value,
-                    }))
-                  }
-                />
-              </div>
+            <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
+              {configEntries.map((entry, index) => (
+                <div key={entry.key} className="space-y-1">
+                  <Label htmlFor={`config-${entry.key}`} className="text-xs font-semibold tracking-wide">
+                    {entry.key}
+                  </Label>
+                  <Input
+                    id={`config-${entry.key}`}
+                    type={entry.inputType}
+                    value={entry.value}
+                    placeholder={entry.originalValue || entry.key}
+                    onChange={(e) => {
+                      const next = [...configEntries];
+                      next[index] = { ...next[index], value: e.target.value };
+                      setConfigEntries(next);
+                    }}
+                    className="text-xs h-9"
+                  />
+                </div>
+              ))}
             </div>
 
-            <div className="flex justify-end gap-2 pt-1">
+            <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" size="sm" onClick={() => setShowConfigForm(false)}>
                 Cancel
               </Button>
               <Button variant="premium" size="sm" onClick={handleApplyConfig}>
-                Apply & Update Code
+                Submit
               </Button>
             </div>
           </Card>

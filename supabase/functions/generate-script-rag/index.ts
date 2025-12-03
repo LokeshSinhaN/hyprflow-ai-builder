@@ -62,7 +62,7 @@ These features PREVENT CAPTCHA and bot detection on ALL websites (Google, Wikipe
    - Optional: use random.uniform(2, 4) for more natural randomized delays
 
 3. EXPLICIT WAITS (REQUIRED):
-   - Use WebDriverWait with 10-15 second timeout for ALL element interactions
+   - Use WebDriverWait with 5 second timeout for ALL element interactions
    - Use EC.presence_of_element_located() for finding elements
    - Use EC.element_to_be_clickable() for buttons before clicking
    - Use EC.url_contains() or EC.title_contains() for page navigation verification
@@ -127,9 +127,9 @@ REQUIRED CODE ORGANIZATION FOR BOTH SCRIPTS
 1. CONFIGURATION SECTION (at top of file):
    - CHROME_DRIVER_PATH variable set to r"C:\\path\\to\\chromedriver.exe"
    - BASE_URL or specific URLs as constants
-   - USERNAME and PASSWORD as placeholders
-   - TIMEOUT constant set to 15
-
+   - Only add credentials like USERNAME/PASSWORD/EMAIL if the SOP or user request explicitly requires them
+   - Do not add placeholder credentials that are not used anywhere in the workflow
+   - TIMEOUT constant set to 5
 2. STEALTH SETUP FUNCTION (mandatory):
    For Selenium: create_stealth_driver()
    For Playwright: create_stealth_browser()
@@ -194,7 +194,7 @@ def create_stealth_driver():
     return driver
 
 WAIT PATTERN (use for every element):
-element = WebDriverWait(driver, 15).until(
+element = WebDriverWait(driver, 5).until(
     EC.presence_of_element_located((By.ID, "element-id"))
 )
 
@@ -296,7 +296,7 @@ KEY SUCCESS CRITERIA (ALL MANDATORY)
 ✓ TIMING: Human-like delays between every major action
 ✓ WAITS: Explicit WebDriverWait for every element interaction
 ✓ SELENIUM & PLAYWRIGHT: Both scripts accomplish identical workflow
-
+✓ NO EXTRA PLACEHOLDERS: Do not create unused USERNAME/PASSWORD or other dummy config values
 Generate both scripts now following ALL requirements above.`;
 
     const userPrompt = `${contextSection}
