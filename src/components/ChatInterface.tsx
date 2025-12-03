@@ -442,8 +442,8 @@ export const ChatInterface = () => {
         </div>
       )}
 
-      {/* Left Panel - Chat */}
-      <div className="flex-1 min-h-0 flex flex-col gap-4">
+      {/* Left Panel - Chat (40% width) */}
+      <div className="basis-2/5 min-w-0 min-h-0 flex flex-col gap-4">
         {/* Messages Area (includes config card so bottom chat controls stay fixed) */}
         <div ref={messagesContainerRef} className="flex-1 overflow-y-auto space-y-4 pr-2">
           {messages.map((msg, idx) => (
@@ -584,8 +584,8 @@ export const ChatInterface = () => {
         </div>
       </div>
 
-      {/* Right Panel - Code Viewer */}
-      <div className="flex-1 min-h-0 flex flex-col relative">
+      {/* Right Panel - Code Viewer (60% width) */}
+      <div className="basis-3/5 min-w-0 min-h-0 flex flex-col relative">
         {isProcessing && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">

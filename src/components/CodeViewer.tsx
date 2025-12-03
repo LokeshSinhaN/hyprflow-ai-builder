@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Download, Play } from "lucide-react";
+import { Copy, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Highlight, themes } from "prism-react-renderer";
 import { cn } from "@/lib/utils";
@@ -33,21 +33,6 @@ export const CodeViewer = ({ pythonCode, playwrightCode, onRun }: CodeViewerProp
     toast.success("Code copied to clipboard!");
   };
 
-  const handleDownload = () => {
-    const filename =
-      activeTab === "python" ? "automation_script_selenium.py" : "automation_script_playwright.py";
-    const blob = new Blob([currentCode], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast.success("Script downloaded!");
-  };
-
   const handleRunClick = () => {
     if (!onRun) {
       toast.info(
@@ -67,53 +52,50 @@ export const CodeViewer = ({ pythonCode, playwrightCode, onRun }: CodeViewerProp
 
   return (
     <div className="h-full flex flex-col gap-4">
-      {/* Header: title, language tabs, and actions all in a single flex row that can wrap */}
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-lg font-semibold mr-1">Generated Scripts</h2>
+      {/* Header: title, language tabs, and actions all in a single row */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-lg font-semibold">Generated Scripts</h2>
 
-        {/* Language tabs */}
-        <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/60 px-1 py-0.5 shadow-sm">
-          <Button
-            type="button"
-            variant={activeTab === "python" ? "secondary" : "ghost"}
-            size="sm"
-            className={cn(
-              "h-8 rounded-full px-3 text-xs font-medium transition-all",
-              activeTab === "python"
-                ? "bg-gradient-to-r from-accent to-primary text-primary-foreground shadow"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-            onClick={() => setActiveTab("python")}
-          >
-            Python (Selenium)
-          </Button>
-          <Button
-            type="button"
-            variant={activeTab === "playwright" ? "secondary" : "ghost"}
-            size="sm"
-            className={cn(
-              "h-8 rounded-full px-3 text-xs font-medium transition-all",
-              activeTab === "playwright"
-                ? "bg-gradient-to-r from-accent to-primary text-primary-foreground shadow"
-                : "text-muted-foreground hover:text-foreground",
-              !playwrightCode && "opacity-60 cursor-not-allowed",
-            )}
-            onClick={() => playwrightCode && setActiveTab("playwright")}
-            disabled={!playwrightCode}
-          >
-            Python (Playwright)
-          </Button>
+          {/* Language tabs */}
+          <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/60 px-1 py-0.5 shadow-sm">
+            <Button
+              type="button"
+              variant={activeTab === "python" ? "secondary" : "ghost"}
+              size="sm"
+              className={cn(
+                "h-8 rounded-full px-3 text-xs font-medium transition-all",
+                activeTab === "python"
+                  ? "bg-gradient-to-r from-accent to-primary text-primary-foreground shadow"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setActiveTab("python")}
+            >
+              Python (Selenium)
+            </Button>
+            <Button
+              type="button"
+              variant={activeTab === "playwright" ? "secondary" : "ghost"}
+              size="sm"
+              className={cn(
+                "h-8 rounded-full px-3 text-xs font-medium transition-all",
+                activeTab === "playwright"
+                  ? "bg-gradient-to-r from-accent to-primary text-primary-foreground shadow"
+                  : "text-muted-foreground hover:text-foreground",
+                !playwrightCode && "opacity-60 cursor-not-allowed",
+              )}
+              onClick={() => playwrightCode && setActiveTab("playwright")}
+              disabled={!playwrightCode}
+            >
+              Python (Playwright)
+            </Button>
+          </div>
         </div>
 
-        {/* Actions: directly after tabs, wrap onto next line if necessary */}
-        <div className="flex gap-2 items-center flex-wrap ml-2">
+        <div className="flex gap-2 items-center">
           <Button variant="ghost" size="sm" onClick={handleCopy}>
             <Copy className="w-4 h-4" />
             Copy
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleDownload}>
-            <Download className="w-4 h-4" />
-            Download
           </Button>
           <Button variant="premium" size="sm" onClick={handleRunClick}>
             <Play className="w-4 h-4" />
