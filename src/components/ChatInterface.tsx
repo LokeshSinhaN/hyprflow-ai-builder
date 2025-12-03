@@ -291,6 +291,9 @@ export const ChatInterface = () => {
     } catch (error) {
       console.error("Error generating script:", error);
       toast.error(error instanceof Error ? error.message : "Failed to generate script. Please try again.");
+    } finally {
+      // Allow user to upload a new SOP or run again after generation completes or fails
+      setIsProcessing(false);
     }
   };
 
