@@ -574,7 +574,19 @@ export const ChatInterface = () => {
       </div>
 
       {/* Right Panel - Code Viewer */}
-      <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col relative">
+        {isProcessing && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3">
+              <div className="p-3 rounded-full bg-gradient-to-tr from-accent to-primary shadow-glow">
+                <Sparkles className="w-6 h-6 text-primary-foreground animate-pulse" />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Generating scripts with your SOP...
+              </p>
+            </div>
+          </div>
+        )}
         {generatedScripts ? (
           <CodeViewer
             pythonCode={generatedScripts.python}
