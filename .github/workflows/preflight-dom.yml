@@ -1,0 +1,49 @@
+name: Preflight DOM Extraction
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Target URL to snapshot"
+        required: true
+        type: string
+      job_id:
+        description: "Supabase preflight_jobs.id"
+        required: true
+        type: string
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      PREFLIGHT_JOB_ID: ${{ github.event.inputs.job_id }}
+      PREFLIGHT_URL: ${{ github.event.inputs.url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium requests
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run preflight extraction
+        env:
+          SUPABASE_URL: ${{ env.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}
+          PREFLIGHT_JOB_ID: ${{ env.PREFLIGHT_JOB_ID }}
+          PREFLIGHT_URL: ${{ env.PREFLIGHT_URL }}
+        run: |
+          python scripts/preflight.py
