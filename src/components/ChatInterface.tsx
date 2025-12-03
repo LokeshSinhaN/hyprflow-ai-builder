@@ -174,6 +174,7 @@ export const ChatInterface = () => {
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   // In auth-free dev mode, conversations and SOPs are kept entirely in local state.
   useEffect(() => {
@@ -386,6 +387,14 @@ export const ChatInterface = () => {
 
     setConfigEntries(detected);
     setShowConfigForm(true);
+
+    // Smoothly scroll the chat column so the config card is visible to the user
+    setTimeout(() => {
+      const container = messagesContainerRef.current;
+      if (container) {
+        container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+      }
+    }, 50);
   };
 
   const handleApplyConfig = () => {
@@ -404,6 +413,16 @@ export const ChatInterface = () => {
     setGeneratedScripts({ python: updatedPython, playwright: updatedPlaywright ?? null });
     setShowConfigForm(false);
     toast.success("Configuration applied. You can now copy or download the updated script.");
+
+    // Add a short assistant message in the chat history to confirm the update
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant" as const,
+        content:
+          "Your configuration values have been applied to the generated script. You can now copy or download the updated code.",
+      },
+    ]);
   };
 
   const handleScreenCapture = () => {
@@ -425,8 +444,8 @@ export const ChatInterface = () => {
 
       {/* Left Panel - Chat */}
       <div className="flex-1 min-h-0 flex flex-col gap-4">
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+        {/* Messages Area (includes config card so bottom chat controls stay fixed) */}
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto space-y-4 pr-2">
           {messages.map((msg, idx) => (
             <Card
               key={idx}
@@ -447,56 +466,48 @@ export const ChatInterface = () => {
               </div>
             </Card>
           ))}
-        </div>
 
-        {/* Inline configuration card (appears below uploaded SOPs, above message input) */}
-        {showConfigForm && configEntries.length > 0 && (
-          <Card className="mt-4 p-6 space-y-6 bg-card/60 border-border/60 shadow-sm">
-            <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+          {showConfigForm && configEntries.length > 0 && (
+            <Card className="p-6 space-y-6 bg-card/60 border-border/60 shadow-sm">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-accent-foreground/80">
+                <p className="text-sm font-semibold uppercase tracking-wide text-foreground">
                   Required Configs
                 </p>
               </div>
-              <p className="mt-1 md:mt-0 text-[11px] text-muted-foreground md:max-w-md">
-                These values will be injected into the generated Selenium script so that you can copy and run it locally
-                without any manual edits. Only values that the model cannot infer from the SOP (usernames, passwords,
-                URLs, driver paths, hashtags, etc.) are shown here.
-              </p>
-            </div>
 
-            <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
-              {configEntries.map((entry, index) => (
-                <div key={entry.key} className="space-y-1">
-                  <Label htmlFor={`config-${entry.key}`} className="text-xs font-semibold tracking-wide">
-                    {entry.key}
-                  </Label>
-                  <Input
-                    id={`config-${entry.key}`}
-                    type={entry.inputType}
-                    value={entry.value}
-                    placeholder={entry.originalValue || entry.key}
-                    onChange={(e) => {
-                      const next = [...configEntries];
-                      next[index] = { ...next[index], value: e.target.value };
-                      setConfigEntries(next);
-                    }}
-                    className="text-xs h-9"
-                  />
-                </div>
-              ))}
-            </div>
+              <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
+                {configEntries.map((entry, index) => (
+                  <div key={entry.key} className="space-y-1">
+                    <Label htmlFor={`config-${entry.key}`} className="text-xs font-semibold tracking-wide">
+                      {entry.key}
+                    </Label>
+                    <Input
+                      id={`config-${entry.key}`}
+                      type={entry.inputType}
+                      value={entry.value}
+                      placeholder={entry.originalValue || entry.key}
+                      onChange={(e) => {
+                        const next = [...configEntries];
+                        next[index] = { ...next[index], value: e.target.value };
+                        setConfigEntries(next);
+                      }}
+                      className="text-xs h-9"
+                    />
+                  </div>
+                ))}
+              </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" size="sm" onClick={() => setShowConfigForm(false)}>
-                Cancel
-              </Button>
-              <Button variant="premium" size="sm" onClick={handleApplyConfig}>
-                Submit
-              </Button>
-            </div>
-          </Card>
-        )}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" size="sm" onClick={() => setShowConfigForm(false)}>
+                  Cancel
+                </Button>
+                <Button variant="premium" size="sm" onClick={handleApplyConfig}>
+                  Submit
+                </Button>
+              </div>
+            </Card>
+          )}
+        </div>
 
         {/* Action Buttons */}
         <div className="flex gap-2">
