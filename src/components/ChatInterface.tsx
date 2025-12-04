@@ -173,6 +173,7 @@ export const ChatInterface = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
+  const [targetUrl, setTargetUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -194,6 +195,37 @@ export const ChatInterface = () => {
       return updated;
     });
     toast.success("SOP removed from current session");
+  };
+
+  const waitForPreflightJob = async (jobId: string) => {
+    const maxAttempts = 15;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const { data, error } = await supabase.functions.invoke("preflight-job", {
+        body: { job_id: jobId },
+      });
+
+      if (error) throw error;
+      if (!data?.job) throw new Error("Invalid response from preflight-job function");
+
+      const job = data.job as { status: string; has_dom_html?: boolean; error?: string };
+
+      if (job.status === "done") {
+        if (!job.has_dom_html) {
+          throw new Error("Pre-flight job completed but DOM HTML is missing.");
+        }
+        return job;
+      }
+
+      if (job.status === "error") {
+        throw new Error(job.error || "Pre-flight job failed.");
+      }
+
+      // pending or running: backoff a bit before next poll
+      const delay = Math.min(1000 * (attempt + 1), 5000);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    throw new Error("Pre-flight job timed out. Please try again.");
   };
 
   const createNewConversation = async () => {
@@ -247,23 +279,62 @@ export const ChatInterface = () => {
         .map((doc, idx) => `\n\n=== SOP ${idx + 1}: ${doc.title} ===\n${doc.content}`)
         .join("\n");
 
-      // Use generate-script-rag edge function so SOP context is handled via RAG-style prompt.
-      const { data, error } = await supabase.functions.invoke("generate-script-rag", {
-        body: {
-          message: userMessage,
-          sop_text: sopContext || undefined,
-        },
-      });
+      let functionResponse: any;
 
-      if (error) throw error;
-      if (data.error) {
-        throw new Error(data.error);
+      if (targetUrl.trim()) {
+        // Pre-flight pipeline: create job -> wait for DOM -> generate script with DOM
+        const cleanedUrl = targetUrl.trim();
+
+        const { data: startData, error: startError } = await supabase.functions.invoke("preflight-job", {
+          body: { target_url: cleanedUrl },
+        });
+
+        if (startError) throw startError;
+        if (!startData?.job?.id) {
+          throw new Error("Failed to create pre-flight job.");
+        }
+
+        const jobId = startData.job.id as string;
+
+        // Wait for GitHub Action + Selenium to finish DOM extraction
+        await waitForPreflightJob(jobId);
+
+        const { data: scriptData, error: scriptError } = await supabase.functions.invoke(
+          "generate-script-preflight",
+          {
+            body: {
+              message: userMessage,
+              sop_text: sopContext || undefined,
+              job_id: jobId,
+            },
+          },
+        );
+
+        if (scriptError) throw scriptError;
+        functionResponse = scriptData;
+      } else {
+        // Legacy RAG-only pipeline (no pre-flight DOM)
+        const { data, error } = await supabase.functions.invoke("generate-script-rag", {
+          body: {
+            message: userMessage,
+            sop_text: sopContext || undefined,
+          },
+        });
+
+        if (error) throw error;
+        functionResponse = data;
       }
 
-      // RAG function may return { scripts: { python_selenium, python_playwright, ... } }
+      if (functionResponse.error) {
+        throw new Error(functionResponse.error as string);
+      }
+
+      // Functions return { scripts: { python_selenium, python_playwright, ... } } or { script }
       const pythonScript =
-        (data.scripts?.python_selenium || data.scripts?.python || data.script) as string;
-      const playwrightScript = (data.scripts?.python_playwright ?? null) as string | null;
+        (functionResponse.scripts?.python_selenium ||
+          functionResponse.scripts?.python ||
+          functionResponse.script) as string;
+      const playwrightScript = (functionResponse.scripts?.python_playwright ?? null) as string | null;
 
       const scripts = { python: pythonScript, playwright: playwrightScript };
       setBaseScripts(scripts);
@@ -271,20 +342,17 @@ export const ChatInterface = () => {
       setShowConfigForm(false);
       setConfigEntries([]);
 
-      const contextInfo = sopContext
-        ? " I used your uploaded SOP documents as additional context."
-        : "";
-
       const assistantMessage = {
         role: "assistant" as const,
-        content: "I've generated a Python script for your automation workflow. Check the code panel on the right to view, copy, or download it!",
+        content:
+          "I've generated a Python script for your automation workflow. Check the code panel on the right to view, copy, or download it!",
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
 
       // Save assistant message with primary Python code (no-op in dev mode)
       await saveMessage("assistant", assistantMessage.content, pythonScript);
-      
+
       // Clear uploaded document after successful generation
       if (uploadedDocument) {
         setUploadedDocument(null);
@@ -563,6 +631,21 @@ export const ChatInterface = () => {
             ))}
           </div>
         )}
+
+        {/* Target URL for Pre-Flight (optional) */}
+        <div className="flex items-center gap-2 mt-2 text-xs">
+          <Label htmlFor="target-url" className="font-medium">
+            Target URL (optional, enables Pre-Flight DOM scan)
+          </Label>
+          <Input
+            id="target-url"
+            type="url"
+            value={targetUrl}
+            onChange={(e) => setTargetUrl(e.target.value)}
+            placeholder="https://example.com/login"
+            className="flex-1 h-8 text-xs"
+          />
+        </div>
 
         {/* Input Area */}
         <div className="flex gap-2 mt-2">
