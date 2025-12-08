@@ -3,6 +3,8 @@ import json
 import time
 import traceback
 
+from urllib.parse import urljoin
+
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -40,7 +42,7 @@ def fetch_job() -> dict:
     return rows[0]
 
 
-def get_optimized_elements(html_content: str):
+def get_optimized_elements(html_content: str, base_url: str):
     """Return only interactive / important elements with suggested selectors.
 
     This dramatically shrinks what we store and send to the LLM compared to raw page_source.
@@ -69,6 +71,17 @@ def get_optimized_elements(html_content: str):
 
         if not is_interesting:
             continue
+
+        # Normalize anchor hrefs to absolute URLs so downstream consumers/LLM
+        # never have to guess or join relative paths.
+        if element.name == "a" and element.has_attr("href"):
+            try:
+                raw_href = element["href"]
+                absolute_href = urljoin(base_url, raw_href)
+                element.attrs["href"] = absolute_href
+            except Exception:
+                # Best-effort normalization; if urljoin fails we keep the original value.
+                pass
 
         el_data = {
             "tag": element.name,
@@ -173,7 +186,8 @@ def main() -> None:
 
                 html = driver.page_source
                 title = driver.title
-                elements = get_optimized_elements(html)
+                # Use the resolved current_url as base for href normalization
+                elements = get_optimized_elements(html, driver.current_url)
 
                 extraction_results[url] = {
                     "title": title,

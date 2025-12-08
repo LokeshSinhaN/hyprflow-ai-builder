@@ -268,18 +268,37 @@ IMPLEMENT FULLY (In-Browser Actions):
 - Handle alerts, confirms, and prompts
 
 DO NOT IMPLEMENT (Out-of-Browser Actions):
-- Parsing downloaded PDF, Excel, or CSV files
-- Writing to databases or updating trackers
-- Making external API calls outside browser context
-- File system operations beyond downloads folder
-- Sending emails or SMS
-- Complex data transformations or processing
-
-For out-of-browser steps mentioned in SOP, add high-level comments:
-"# TODO: Parse the downloaded report.pdf and update master tracker database"
-
-================================================================================
-CODE FORMAT AND OUTPUT STRUCTURE
+|- Parsing downloaded PDF, Excel, or CSV files
+|- Writing to databases or updating trackers
+|- Making external API calls outside browser context
+|- File system operations beyond downloads folder
+|- Sending emails or SMS
+|- Complex data transformations or processing
+|
+|ITERATION & LOOPING RULES (CRITICAL):
+|1. HANDLING LISTS: When the SOP or DOM context asks to "process all links" or "repeat for every item":
+|   - FIRST: Collect all valid URLs from the elements into a Python list of strings.
+|     Example (Selenium):
+|       links = driver.find_elements(By.CSS_SELECTOR, "a.result-link")
+|       urls = [link.get_attribute("href") for link in links if link.get_attribute("href")]
+|   - SECOND: Iterate through the list of URLs (NOT the WebElement objects).
+|     Example:
+|       for url in urls:
+|           driver.get(url)
+|           # perform the required steps on the detail page
+|   - NEVER iterate over WebElements directly if the loop involves navigation (e.g., clicking into a detail page),
+|     because this causes StaleElementReferenceException when the page reloads.
+|
+|2. GENERALIZATION:
+|   - If the DOM context contains specific examples (e.g., "Result 1", "Result 2"), inspect whether they share a common class or structure.
+|   - Prefer selectors that target the reusable pattern (for example, class="result-link" or a common container) rather than a single hard-coded id.
+|   - Write loops so they work for ALL matching items, not just a single hard-coded example.
+|
+|For out-of-browser steps mentioned in SOP, add high-level comments:
+|"# TODO: Parse the downloaded report.pdf and update master tracker database"
+|
+|================================================================================
+|CODE FORMAT AND OUTPUT STRUCTURE
 ================================================================================
 
 You MUST return your response in this EXACT format with these EXACT delimiters:
