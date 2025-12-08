@@ -200,7 +200,9 @@ export const ChatInterface = () => {
   };
 
   const waitForPreflightJob = async (jobId: string) => {
-    const maxAttempts = 15;
+    // Allow more time for GitHub Actions + Selenium to finish on slower pages
+    const maxAttempts = 40;
+
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const { data, error } = await supabase.functions.invoke("preflight-job", {
         body: { job_id: jobId },
@@ -210,6 +212,7 @@ export const ChatInterface = () => {
       if (!data?.job) throw new Error("Invalid response from preflight-job function");
 
       const job = data.job as { status: string; has_dom_html?: boolean; error?: string };
+      console.log("[Preflight] Poll status", { jobId, attempt, status: job.status, hasDom: job.has_dom_html });
 
       if (job.status === "done") {
         if (!job.has_dom_html) {
@@ -222,12 +225,12 @@ export const ChatInterface = () => {
         throw new Error(job.error || "Pre-flight job failed.");
       }
 
-      // pending or running: backoff a bit before next poll
+      // pending or running: back off a bit before next poll
       const delay = Math.min(1000 * (attempt + 1), 5000);
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
 
-    throw new Error("Pre-flight job timed out. Please try again.");
+    throw new Error("Pre-flight job timed out before DOM HTML was available. Please check GitHub Actions logs and try again.");
   };
 
   const createNewConversation = async () => {

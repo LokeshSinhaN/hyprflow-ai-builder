@@ -213,11 +213,21 @@ MANDATORY ANTI-DETECTION FEATURES (MUST INCLUDE IN ALL SCRIPTS)
 
 These features PREVENT CAPTCHA and bot detection on ALL websites (Google, Wikipedia, portals, e-commerce, social media, etc.)
 
-CRITICAL SELECTOR RULES (APPLY EVEN THOUGH YOU HAVE THE DOM):
-- Always prefer this locator priority: id > name > data-testid > aria-label > placeholder > visible text.
-- Avoid CSS selectors that depend on visual/utility classes such as Tailwind (classes containing ':', '[', ']', or starting with 'text-', 'bg-', 'w-', 'h-', 'mt-', 'mb-', 'flex', etc.).
-- Only use short, semantic classes (e.g. 'btn-primary', 'login-button') when absolutely necessary; never use long Tailwind-style class chains in selectors.
-- Even with the DOM, always generate resilient code using try/except and multiple locator strategies (primary id, fallback name/data-testid, fallback XPath by text).
+CRITICAL SELECTOR RULES (UNIVERSAL ROBUSTNESS):
+1. NO DIRECT CHILDREN: Never assume an element is a direct child of another.
+   - BAD (XPath): //div[@id='results']/a
+   - BAD (CSS): #results > a
+   - GOOD (CSS): #results a
+   - GOOD (XPath): //div[@id='results']//a
+
+2. TRUST STRUCTURE, NOT TEXT:
+   - DO NOT filter links by checking if the 'href' string contains the target domain.
+   - REASON: Redirect URLs (e.g., 'google.com/url?q=...') will fail such filters.
+   - LOGIC: If the element matches the selector (e.g., 'li.result a'), click it regardless of href text.
+
+3. RESILIENT LOCATORS:
+   - Prefer CSS selectors for lists: driver.find_elements(By.CSS_SELECTOR, "ul.search-results li a")
+   - Use XPath only for text matching: //button[contains(text(), 'Submit')]
 
 1. ANTI-BOT CHROME OPTIONS (CRITICAL):
    - Add Chrome argument: --disable-blink-features=AutomationControlled
