@@ -120,7 +120,7 @@ serve(async (req) => {
             body: JSON.stringify({
               ref: GITHUB_REF,
               inputs: {
-                url: cleanedUrl,
+                url: primaryUrl,
                 job_id: job.id,
               },
             }),

@@ -175,6 +175,7 @@ export const ChatInterface = () => {
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const [targetUrl, setTargetUrl] = useState("");
   const [cookiesJson, setCookiesJson] = useState("");
+  const [showPreflightSetup, setShowPreflightSetup] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -433,6 +434,7 @@ export const ChatInterface = () => {
 
     setSopDocuments((prev) => [newDoc, ...prev]);
     setUploadedDocument(newDoc.title);
+    setShowPreflightSetup(true);
 
     // Set suggested message
     setMessage(
@@ -643,39 +645,66 @@ export const ChatInterface = () => {
           </div>
         )}
 
-        {/* Target URLs for Pre-Flight (optional) */}
-        <div className="mt-2 text-xs space-y-1">
-          <Label htmlFor="target-url" className="font-medium">
-            Target URLs (optional, enables Pre-Flight DOM scan)
-          </Label>
-          <Textarea
-            id="target-url"
-            value={targetUrl}
-            onChange={(e) => setTargetUrl(e.target.value)}
-            placeholder={"https://example.com/main\nhttps://example.com/register"}
-            className="w-full h-16 text-xs resize-none bg-card/50 border-border/50"
-          />
-          <p className="text-[10px] text-muted-foreground">
-            Enter one or more URLs from the same domain, separated by newlines or commas. These pages will be scanned in pre-flight.
-          </p>
-        </div>
+        {/* Pre-Flight configuration (only after SOP upload) */}
+        {sopDocuments.length > 0 && showPreflightSetup && (
+          <div className="mt-2 space-y-3 text-xs border border-border/50 rounded-md p-3 bg-card/40">
+            <p className="font-medium">Optional Pre-Flight Setup</p>
+            <div className="space-y-1">
+              <Label htmlFor="target-url" className="font-medium">
+                Target URLs (one per line)
+              </Label>
+              <Textarea
+                id="target-url"
+                value={targetUrl}
+                onChange={(e) => setTargetUrl(e.target.value)}
+                placeholder={"https://example.com/main\nhttps://example.com/register"}
+                className="w-full h-16 text-xs resize-none bg-card/50 border-border/50"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Enter one or more URLs from the same domain, separated by newlines or commas. These pages will be scanned during pre-flight.
+              </p>
+            </div>
 
-        {/* Auth cookies JSON for Pre-Flight (optional) */}
-        <div className="mt-2 text-xs space-y-1">
-          <Label htmlFor="cookies-json" className="font-medium">
-            Auth Cookies JSON (optional)
-          </Label>
-          <Textarea
-            id="cookies-json"
-            value={cookiesJson}
-            onChange={(e) => setCookiesJson(e.target.value)}
-            placeholder="Paste EditThisCookie JSON export here to reuse an existing logged-in session..."
-            className="w-full h-16 text-xs resize-none bg-card/50 border-border/50"
-          />
-          <p className="text-[10px] text-muted-foreground">
-            This JSON is stored only in the current pre-flight job and used by GitHub Actions to access authenticated pages.
-          </p>
-        </div>
+            <div className="space-y-1">
+              <Label htmlFor="cookies-json" className="font-medium">
+                Auth Cookies JSON (optional)
+              </Label>
+              <Textarea
+                id="cookies-json"
+                value={cookiesJson}
+                onChange={(e) => setCookiesJson(e.target.value)}
+                placeholder="Paste EditThisCookie JSON export here to reuse an existing logged-in session..."
+                className="w-full h-16 text-xs resize-none bg-card/50 border-border/50"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                This JSON is stored only in the current pre-flight job and used by GitHub Actions to access authenticated pages.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  // Allow skipping pre-flight; hide setup without clearing current values
+                  setShowPreflightSetup(false);
+                }}
+              >
+                Skip for now
+              </Button>
+              <Button
+                variant="premium"
+                size="sm"
+                onClick={() => {
+                  // Confirm configuration and return to normal chat UI
+                  setShowPreflightSetup(false);
+                }}
+              >
+                Go
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Input Area */}
         <div className="flex gap-2 mt-2">

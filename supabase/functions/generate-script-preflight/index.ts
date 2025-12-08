@@ -194,10 +194,6 @@ serve(async (req) => {
       sopContext = "No SOP documents were provided. Generate script based on user request and DOM only.";
     }
 
-    const domContext = promptDomSnippet
-      ? `\n\n=== LIVE PAGE DOM SNAPSHOT ===\n${promptDomSnippet}\n=== END LIVE PAGE DOM SNAPSHOT ===\n`
-      : "";
-
     const combinedContext = `${sopContext}${domContext}`;
 
     const contextSection = combinedContext
