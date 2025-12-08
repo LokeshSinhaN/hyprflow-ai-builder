@@ -174,6 +174,7 @@ export const ChatInterface = () => {
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const [targetUrl, setTargetUrl] = useState("");
+  const [cookiesJson, setCookiesJson] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -283,10 +284,20 @@ export const ChatInterface = () => {
 
       if (targetUrl.trim()) {
         // Pre-flight pipeline: create job -> wait for DOM -> generate script with DOM
-        const cleanedUrl = targetUrl.trim();
+        const cleaned = targetUrl.trim();
+        const urlList = cleaned
+          .split(/[\n,]+/)
+          .map((u) => u.trim())
+          .filter((u) => u.length > 0);
+
+        const primaryUrl = urlList[0];
 
         const { data: startData, error: startError } = await supabase.functions.invoke("preflight-job", {
-          body: { target_url: cleanedUrl },
+          body: {
+            target_url: primaryUrl,
+            target_urls: urlList,
+            cookies_json: cookiesJson.trim() || undefined,
+          },
         });
 
         if (startError) throw startError;
@@ -632,19 +643,38 @@ export const ChatInterface = () => {
           </div>
         )}
 
-        {/* Target URL for Pre-Flight (optional) */}
-        <div className="flex items-center gap-2 mt-2 text-xs">
+        {/* Target URLs for Pre-Flight (optional) */}
+        <div className="mt-2 text-xs space-y-1">
           <Label htmlFor="target-url" className="font-medium">
-            Target URL (optional, enables Pre-Flight DOM scan)
+            Target URLs (optional, enables Pre-Flight DOM scan)
           </Label>
-          <Input
+          <Textarea
             id="target-url"
-            type="url"
             value={targetUrl}
             onChange={(e) => setTargetUrl(e.target.value)}
-            placeholder="https://example.com/login"
-            className="flex-1 h-8 text-xs"
+            placeholder={"https://example.com/main\nhttps://example.com/register"}
+            className="w-full h-16 text-xs resize-none bg-card/50 border-border/50"
           />
+          <p className="text-[10px] text-muted-foreground">
+            Enter one or more URLs from the same domain, separated by newlines or commas. These pages will be scanned in pre-flight.
+          </p>
+        </div>
+
+        {/* Auth cookies JSON for Pre-Flight (optional) */}
+        <div className="mt-2 text-xs space-y-1">
+          <Label htmlFor="cookies-json" className="font-medium">
+            Auth Cookies JSON (optional)
+          </Label>
+          <Textarea
+            id="cookies-json"
+            value={cookiesJson}
+            onChange={(e) => setCookiesJson(e.target.value)}
+            placeholder="Paste EditThisCookie JSON export here to reuse an existing logged-in session..."
+            className="w-full h-16 text-xs resize-none bg-card/50 border-border/50"
+          />
+          <p className="text-[10px] text-muted-foreground">
+            This JSON is stored only in the current pre-flight job and used by GitHub Actions to access authenticated pages.
+          </p>
         </div>
 
         {/* Input Area */}

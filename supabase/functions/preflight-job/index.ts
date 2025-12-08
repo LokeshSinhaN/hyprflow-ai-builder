@@ -8,6 +8,8 @@ const corsHeaders = {
 
 interface CreateJobBody {
   target_url?: string;
+  target_urls?: string[];
+  cookies_json?: unknown;
   job_id?: string;
 }
 
@@ -18,7 +20,7 @@ serve(async (req) => {
 
   try {
     const body = (await req.json().catch(() => ({}))) as CreateJobBody;
-    const { target_url, job_id } = body;
+    const { target_url, target_urls, cookies_json, job_id } = body;
 
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -39,20 +41,48 @@ serve(async (req) => {
     };
 
     // CREATE JOB MODE
-    if (target_url && !job_id && req.method === "POST") {
-      const cleanedUrl = target_url.trim();
-      if (!cleanedUrl.startsWith("http://") && !cleanedUrl.startsWith("https://")) {
+    if ((target_url || (target_urls && Array.isArray(target_urls) && target_urls.length > 0)) && !job_id && req.method === "POST") {
+      const urlList = (target_urls && Array.isArray(target_urls)
+        ? target_urls
+        : target_url
+        ? [target_url]
+        : [])
+        .map((u) => u.trim())
+        .filter((u) => u.length > 0);
+
+      if (!urlList.length) {
         return new Response(
-          JSON.stringify({ error: "target_url must start with http:// or https://" }),
+          JSON.stringify({ error: "At least one target_url is required" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
+
+      for (const u of urlList) {
+        if (!u.startsWith("http://") && !u.startsWith("https://")) {
+          return new Response(
+            JSON.stringify({ error: "All target_urls must start with http:// or https://" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+      }
+
+      const primaryUrl = urlList[0];
 
       // Insert job row
       const insertResp = await supabaseFetch("/rest/v1/preflight_jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json", Prefer: "return=representation" },
-        body: JSON.stringify({ target_url: cleanedUrl, status: "pending" }),
+        body: JSON.stringify({
+          target_url: primaryUrl,
+          status: "pending",
+          target_urls: JSON.stringify(urlList),
+          // Store cookies JSON as a raw string if provided; caller is responsible for sending valid JSON.
+          cookies_json: typeof cookies_json === "string"
+            ? (cookies_json as string)
+            : cookies_json
+            ? JSON.stringify(cookies_json)
+            : null,
+        }),
       });
 
       if (!insertResp.ok) {

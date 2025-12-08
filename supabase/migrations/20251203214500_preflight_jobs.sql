@@ -4,6 +4,10 @@ CREATE TABLE public.preflight_jobs (
     target_url TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending', -- pending | running | done | error
     dom_html TEXT,
+    -- Optional JSON-encoded cookies used for authenticated DOM capture
+    cookies_json TEXT,
+    -- Optional JSON-encoded list of target URLs for multi-page capture
+    target_urls TEXT,
     error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
