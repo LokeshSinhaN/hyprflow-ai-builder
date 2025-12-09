@@ -6,13 +6,39 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Lightweight sanitizer to strip noisy attributes from DOM before sending to the LLM.
+// We keep structural and semantic identifiers (id/name/class/role/aria-*) and only drop very noisy inline styles.
+const sanitizeDomSnippet = (html: string): string => {
+  let cleaned = html;
+
+  // Remove script & style blocks entirely
+  cleaned = cleaned.replace(/<script[\s\S]*?<\/script>/gi, "");
+  cleaned = cleaned.replace(/<style[\s\S]*?<\/style>/gi, "");
+
+  // Keep class/role/aria-* attributes so the LLM can see stable selectors,
+  // but drop inline style attributes to reduce token usage.
+  cleaned = cleaned.replace(/\sstyle="[^"]*"/gi, "");
+
+  // Collapse repeated whitespace
+  cleaned = cleaned.replace(/\s{2,}/g, " ");
+
+  return cleaned.trim();
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { message, sop_text } = await req.json();
+    const body = await req.json();
+    const { message, sop_text, preflight_job_id, previous_scripts } = body as {
+      message: string;
+      sop_text?: string;
+      preflight_job_id?: string;
+      previous_scripts?: { python?: string; playwright?: string | null };
+    };
+
     const geminiApiKey = Deno.env.get("GEMINI_API_KEY")!;
 
     if (!geminiApiKey) {
@@ -28,8 +54,118 @@ serve(async (req) => {
       sopContext = "No SOP documents were provided. Generate script based on user request only.";
     }
 
-    const contextSection = sopContext
-      ? `\n\n=== COMPLETE SOP WORKFLOW ===\n${sopContext}\n=== END SOP ===\n`
+    // Optionally enrich context with DOM from an existing pre-flight job so follow-up
+    // prompts (bug fixes, selector issues) can reason about the live page without
+    // triggering a fresh DOM capture.
+    let domContext = "";
+
+    if (preflight_job_id) {
+      const supabaseUrl = Deno.env.get("SUPABASE_URL");
+      const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+      if (supabaseUrl && supabaseServiceRoleKey) {
+        try {
+          const jobResp = await fetch(
+            `${supabaseUrl}/rest/v1/preflight_jobs?id=eq.${preflight_job_id}&select=target_url,dom_html,status,error,target_urls`,
+            {
+              headers: {
+                apikey: supabaseServiceRoleKey,
+                Authorization: `Bearer ${supabaseServiceRoleKey}`,
+              },
+            },
+          );
+
+          if (!jobResp.ok) {
+            const text = await jobResp.text();
+            console.warn("[RAG] Failed to fetch preflight job for DOM context", jobResp.status, text);
+          } else {
+            const rows = (await jobResp.json()) as any[];
+            if (rows.length) {
+              const job = rows[0];
+              const rawDomHtml: string = job.dom_html as string;
+
+              let structuredExtraction: Record<string, any> | null = null;
+              try {
+                const parsed = JSON.parse(rawDomHtml);
+                if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                  structuredExtraction = parsed as Record<string, any>;
+                }
+              } catch {
+                // Not JSON, fall back to legacy raw HTML behaviour below.
+              }
+
+              if (structuredExtraction) {
+                const maxPages = 3;
+                const maxElementsPerPage = 150;
+                const entries = Object.entries(structuredExtraction).slice(0, maxPages);
+                const parts: string[] = [];
+
+                for (const [url, data] of entries) {
+                  const page = data as { title?: string; interactive_elements?: any[]; element_count?: number };
+                  const title = page.title ?? "";
+                  const elements = Array.isArray(page.interactive_elements) ? page.interactive_elements : [];
+
+                  parts.push(`\n\n=== PAGE: ${url} (Title: ${title}) ===`);
+                  parts.push(`Total interactive elements detected: ${page.element_count ?? elements.length}`);
+                  parts.push("INTERACTIVE ELEMENTS (truncated):");
+
+                  for (const el of elements.slice(0, maxElementsPerPage)) {
+                    const tag = el.tag ?? "";
+                    const text = (el.text ?? "").toString().slice(0, 120);
+                    const attrs = el.attributes ?? {};
+                    const selector = el.suggested_selector ?? "";
+
+                    const attrBits: string[] = [];
+                    if (attrs.id) attrBits.push(`id=\"${attrs.id}\"`);
+                    if (attrs.name) attrBits.push(`name=\"${attrs.name}\"`);
+                    if (attrs.class) attrBits.push(`class=\"${attrs.class}\"`);
+                    if (attrs.role) attrBits.push(`role=\"${attrs.role}\"`);
+                    if (attrs.placeholder) attrBits.push(`placeholder=\"${attrs.placeholder}\"`);
+                    if (attrs["aria-label"]) attrBits.push(`aria-label=\"${attrs["aria-label"]}\"`);
+                    if (attrs["data-testid"]) attrBits.push(`data-testid=\"${attrs["data-testid"]}\"`);
+
+                    const attrStr = attrBits.join(" ");
+                    let line = `- <${tag}${attrStr ? " " + attrStr : ""}> text=\"${text}\"`;
+                    if (selector) {
+                      line += ` -> SUGGESTED SELECTOR: ${selector}`;
+                    }
+                    parts.push(line);
+                  }
+                }
+
+                domContext = parts.join("\n");
+                console.log("[RAG] Attached structured DOM context from preflight job", {
+                  preflight_job_id,
+                  pageCount: entries.length,
+                });
+              } else if (rawDomHtml) {
+                const domSnippet = rawDomHtml.length > 40000 ? rawDomHtml.slice(0, 40000) : rawDomHtml;
+                const promptDomSnippet = sanitizeDomSnippet(domSnippet);
+
+                domContext = promptDomSnippet
+                  ? `\n\n=== LIVE PAGE DOM SNAPSHOT (from preflight job) ===\n${promptDomSnippet}\n=== END LIVE PAGE DOM SNAPSHOT ===\n`
+                  : "";
+
+                console.log("[RAG] Attached legacy DOM snapshot from preflight job", {
+                  preflight_job_id,
+                  domLength: rawDomHtml.length,
+                  snippetLength: promptDomSnippet.length,
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("[RAG] Error while loading DOM context from preflight job", err);
+        }
+      } else {
+        console.warn("[RAG] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured; skipping DOM context");
+      }
+    }
+
+    const combinedContext = `${sopContext}${domContext}`;
+
+    const contextSection = combinedContext
+      ? `\n\n=== COMPLETE WORKFLOW + DOM CONTEXT ===\n${combinedContext}\n=== END CONTEXT ===\n`
       : "";
 
     // ENHANCED SYSTEM PROMPT WITH ALL ANTI-CAPTCHA INSTRUCTIONS
@@ -37,7 +173,7 @@ serve(async (req) => {
 
 Generate TWO complete Python automation scripts with UNIVERSAL ANTI-DETECTION capabilities that work for ANY website.
 
-${contextSection ? "CRITICAL: Use the SOP content above as the source of truth for workflow steps." : ""}
+${contextSection ? "CRITICAL: Use the SOP/DOM/code context above as the source of truth for workflow steps, selectors, and fixes." : ""}
 
 ================================================================================
 MANDATORY ANTI-DETECTION FEATURES (MUST INCLUDE IN ALL SCRIPTS)
@@ -299,7 +435,15 @@ KEY SUCCESS CRITERIA (ALL MANDATORY)
 ✓ NO EXTRA PLACEHOLDERS: Do not create unused USERNAME/PASSWORD or other dummy config values
 Generate both scripts now following ALL requirements above.`;
 
-    const userPrompt = `${contextSection}
+    const previousCodeSection = previous_scripts && (previous_scripts.python || previous_scripts.playwright)
+      ? `\n\n=== EXISTING GENERATED SCRIPTS ===\n${
+          previous_scripts.python ? `--- PYTHON (Selenium) ---\n${previous_scripts.python}\n` : ""
+        }${
+          previous_scripts.playwright ? `--- PYTHON (Playwright) ---\n${previous_scripts.playwright}\n` : ""
+        }=== END EXISTING SCRIPTS ===\n`
+      : "";
+
+    const userPrompt = `${contextSection}${previousCodeSection}
 
 ---
 
@@ -326,7 +470,7 @@ Remember: Output ONLY raw Python code between the === delimiters. No triple back
 Generate complete, CAPTCHA-resistant scripts now.`;
 
     console.log("🚀 Calling Gemini with ENHANCED anti-CAPTCHA LCI prompt...");
-    console.log(`📊 Context length: ${sopContext.length} characters`);
+    console.log(`📊 Context length: ${combinedContext.length} characters`);
     console.log(`📁 SOP source: ${contextSource}`);
 
     const aiResponse = await fetch(
@@ -453,13 +597,13 @@ Generate complete, CAPTCHA-resistant scripts now.`;
         pythonPlaywrightScript = stripCodeFences(allPythonBlocks[1]);
 
         return new Response(JSON.stringify({
-          scripts: { 
-            python_selenium: pythonSeleniumScript, 
-            python_playwright: pythonPlaywrightScript, 
-            raw: generatedContent 
-          },
-          model_used: "gemini-2.5-flash",
-          context_used: sopContext.length,
+        scripts: { 
+          python_selenium: pythonSeleniumScript, 
+          python_playwright: pythonPlaywrightScript, 
+          raw: generatedContent 
+        },
+        model_used: "gemini-2.5-flash",
+        context_used: combinedContext.length,
           context_source: contextSource,
           sop_file: sopFileName,
           retrieval_method: "long_context_injection",
@@ -494,7 +638,7 @@ Generate complete, CAPTCHA-resistant scripts now.`;
           raw: generatedContent 
         },
         model_used: "gemini-2.5-flash",
-        context_used: sopContext.length,
+        context_used: combinedContext.length,
         context_source: contextSource,
         sop_file: sopFileName,
         retrieval_method: "long_context_injection",
@@ -518,7 +662,7 @@ Generate complete, CAPTCHA-resistant scripts now.`;
         raw: generatedContent
       },
       model_used: "gemini-2.5-flash",
-      context_used: sopContext.length,
+      context_used: combinedContext.length,
       context_source: contextSource,
       sop_file: sopFileName,
       retrieval_method: "long_context_injection",

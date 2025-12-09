@@ -13,7 +13,7 @@ interface GeneratePreflightBody {
 }
 
 // Lightweight sanitizer to strip noisy attributes from DOM before sending to the LLM.
-// We keep structural identifiers (id/name/etc.) and drop big Tailwind-style classes & inline styles.
+// We keep structural and semantic identifiers (id/name/class/role/aria-*) and only drop very noisy inline styles.
 const sanitizeDomSnippet = (html: string): string => {
   let cleaned = html;
 
@@ -21,10 +21,8 @@ const sanitizeDomSnippet = (html: string): string => {
   cleaned = cleaned.replace(/<script[\s\S]*?<\/script>/gi, "");
   cleaned = cleaned.replace(/<style[\s\S]*?<\/style>/gi, "");
 
-  // Drop class attributes (these are usually visual/utility-only and very brittle)
-  cleaned = cleaned.replace(/\sclass="[^"]*"/gi, "");
-
-  // Drop inline style attributes
+  // Keep class/role/aria-* attributes so the LLM can see stable selectors,
+  // but drop inline style attributes to reduce token usage.
   cleaned = cleaned.replace(/\sstyle="[^"]*"/gi, "");
 
   // Collapse repeated whitespace
@@ -150,7 +148,13 @@ serve(async (req) => {
           const attrBits: string[] = [];
           if (attrs.id) attrBits.push(`id=\"${attrs.id}\"`);
           if (attrs.name) attrBits.push(`name=\"${attrs.name}\"`);
+          if (attrs.class) {
+            const classVal = Array.isArray(attrs.class) ? attrs.class.join(" ") : attrs.class;
+            attrBits.push(`class="${classVal}"`);
+          }
+          if (attrs.role) attrBits.push(`role=\"${attrs.role}\"`);
           if (attrs.placeholder) attrBits.push(`placeholder=\"${attrs.placeholder}\"`);
+          if (attrs["aria-label"]) attrBits.push(`aria-label=\"${attrs["aria-label"]}\"`);
           if (attrs["data-testid"]) attrBits.push(`data-testid=\"${attrs["data-testid"]}\"`);
 
           const attrStr = attrBits.join(" ");
@@ -221,6 +225,7 @@ MANDATORY ANTI-DETECTION FEATURES (MUST INCLUDE IN ALL SCRIPTS)
 These features PREVENT CAPTCHA and bot detection on ALL websites (Google, Wikipedia, portals, e-commerce, social media, etc.)
 
 CRITICAL SELECTOR RULES (UNIVERSAL ROBUSTNESS):
+- Never guess selectors based on URL parameters; you must find the exact element in the provided DOM structure.
 1. NO DIRECT CHILDREN: Never assume an element is a direct child of another.
    - BAD (XPath): //div[@id='results']/a
    - BAD (CSS): #results > a

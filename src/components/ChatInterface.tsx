@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 const MAX_MESSAGE_LENGTH = 10000;
 
@@ -176,6 +177,8 @@ export const ChatInterface = () => {
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const [targetUrl, setTargetUrl] = useState("");
   const [showPreflightSetup, setShowPreflightSetup] = useState(false);
+  const [usePreflight, setUsePreflight] = useState(false);
+  const [lastPreflightJobId, setLastPreflightJobId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -241,6 +244,9 @@ export const ChatInterface = () => {
     setBaseScripts(null);
     setShowConfigForm(false);
     setConfigEntries([]);
+    setTargetUrl("");
+    setUsePreflight(false);
+    setLastPreflightJobId(null);
   };
 
   const loadConversation = async (_conversationId: string) => {
@@ -255,6 +261,12 @@ export const ChatInterface = () => {
 
   const handleSend = async () => {
     if (!message.trim()) return;
+
+    // If pre-flight is enabled, require at least one target URL.
+    if (usePreflight && !targetUrl.trim()) {
+      toast.error("Please enter at least one Target URL or turn off the Target URLs toggle.");
+      return;
+    }
 
     // Require at least one indexed SOP with content before generating scripts
     if (!sopDocuments.some((d) => d.status === "indexed" && d.content)) {
@@ -287,7 +299,7 @@ export const ChatInterface = () => {
 
       let functionResponse: any;
 
-      if (targetUrl.trim()) {
+      if (usePreflight && targetUrl.trim()) {
         // Pre-flight pipeline: create job -> wait for DOM -> generate script with DOM
         const cleaned = targetUrl.trim();
         setStatusMessage("Starting pre-flight DOM scan for your target URLs...");
@@ -313,6 +325,7 @@ export const ChatInterface = () => {
         }
 
         const jobId = startData.job.id as string;
+        setLastPreflightJobId(jobId);
 
         // Wait for GitHub Action + Selenium to finish DOM extraction
         await waitForPreflightJob(jobId);
@@ -333,12 +346,16 @@ export const ChatInterface = () => {
         if (scriptError) throw scriptError;
         functionResponse = scriptData;
       } else {
-        // Legacy RAG-only pipeline (no pre-flight DOM)
-        setStatusMessage("Generating automation scripts from your SOP...");
+        // RAG-only pipeline (no new pre-flight DOM capture)
+        setStatusMessage("Generating automation scripts from your SOP and existing context...");
         const { data, error } = await supabase.functions.invoke("generate-script-rag", {
           body: {
             message: userMessage,
             sop_text: sopContext || undefined,
+            // Provide previous scripts so the edge function can reason about fixes/refinements.
+            previous_scripts: baseScripts ?? generatedScripts ?? undefined,
+            // If a pre-flight job has already captured DOM for this session, expose it for follow-up prompts.
+            preflight_job_id: lastPreflightJobId || undefined,
           },
         });
 
@@ -459,6 +476,9 @@ export const ChatInterface = () => {
     setSopDocuments((prev) => [newDoc, ...prev]);
     setUploadedDocument(newDoc.title);
     setShowPreflightSetup(true);
+    setTargetUrl("");
+    setUsePreflight(false);
+    setLastPreflightJobId(null);
 
     // Set suggested message
     setMessage(
@@ -547,8 +567,8 @@ export const ChatInterface = () => {
         </div>
       )}
 
-      {/* Left Panel - Chat (40% width) */}
-      <div className="basis-2/5 min-w-0 min-h-0 flex flex-col gap-4">
+      {/* Left Panel - Chat (~45% width) */}
+      <div className="basis-[45%] min-w-0 min-h-0 flex flex-col gap-4">
         {/* Messages Area (includes config card so bottom chat controls stay fixed) */}
         <div ref={messagesContainerRef} className="flex-1 overflow-y-auto space-y-4 pr-2">
           {messages.map((msg, idx) => (
@@ -669,8 +689,8 @@ export const ChatInterface = () => {
           </div>
         )}
 
-        {/* Pre-Flight configuration (only after SOP upload) */}
-        {sopDocuments.length > 0 && showPreflightSetup && (
+        {/* Pre-Flight configuration (only after SOP upload & when toggle is ON) */}
+        {sopDocuments.length > 0 && showPreflightSetup && usePreflight && (
           <div className="mt-2 space-y-3 text-xs border border-border/50 rounded-md p-3 bg-card/40">
             <p className="font-medium">Optional Pre-Flight Setup</p>
             <div className="space-y-1">
@@ -715,27 +735,44 @@ export const ChatInterface = () => {
         )}
 
         {/* Input Area */}
-        <div className="flex gap-2 mt-2">
-          <Textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder={uploadedDocument ? "Ask me to generate automation scripts based on your uploaded SOP..." : "Describe the automation workflow you need..."}
-            className="min-h-[100px] resize-none bg-card/50 backdrop-blur-sm border-border/50 focus:border-accent/50"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-          />
+        <div className="flex gap-2 mt-2 items-end">
+          <div className="flex-1 relative">
+            <Textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder={uploadedDocument ? "Ask me to generate automation scripts based on your uploaded SOP..." : "Describe the automation workflow you need..."}
+              className="min-h-[100px] resize-none bg-card/50 backdrop-blur-sm border-border/50 focus:border-accent/50 pr-32 pb-8"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+            />
+            {/* Target URLs toggle lives inside the prompt box, anchored to the bottom-left */}
+            <div className="pointer-events-none absolute left-3 bottom-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <Switch
+                id="toggle-preflight"
+                checked={usePreflight}
+                onCheckedChange={setUsePreflight}
+                className="pointer-events-auto h-4 w-7 data-[state=checked]:bg-accent data-[state=checked]:border-accent"
+              />
+              <Label
+                htmlFor="toggle-preflight"
+                className="pointer-events-auto text-[11px] cursor-pointer select-none"
+              >
+                Target URLs (enable pre-flight DOM capture)
+              </Label>
+            </div>
+          </div>
           <Button variant="premium" size="icon" onClick={handleSend} className="h-[100px] w-12">
             <Send className="w-5 h-5" />
           </Button>
         </div>
       </div>
 
-      {/* Right Panel - Code Viewer (60% width) */}
-      <div className="basis-3/5 min-w-0 min-h-0 flex flex-col relative">
+      {/* Right Panel - Code Viewer (~55% width) */}
+      <div className="basis-[55%] min-w-0 min-h-0 flex flex-col relative">
         {isProcessing && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">
