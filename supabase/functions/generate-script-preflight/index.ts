@@ -232,9 +232,16 @@ CRITICAL SELECTOR RULES (UNIVERSAL ROBUSTNESS):
    - REASON: Redirect URLs (e.g., 'google.com/url?q=...') will fail such filters.
    - LOGIC: If the element matches the selector (e.g., 'li.result a'), click it regardless of href text.
 
-3. RESILIENT LOCATORS:
+3. IGNORE WHITESPACE FORMATTING:
+   - Websites often split text across lines or insert extra whitespace.
+   - NEVER rely on exact text matches when using XPath.
+   - ALWAYS use normalize-space() when matching by text so that "Health\nLibrary" and "Health Library" are treated the same.
+   - BAD: //button[contains(text(), 'Submit')]
+   - GOOD: //button[contains(normalize-space(), 'Submit')]
+
+4. RESILIENT LOCATORS:
    - Prefer CSS selectors for lists: driver.find_elements(By.CSS_SELECTOR, "ul.search-results li a")
-   - Use XPath only for text matching: //button[contains(text(), 'Submit')]
+   - Use XPath only for text matching: //button[contains(normalize-space(), 'Submit')]
 
 1. ANTI-BOT CHROME OPTIONS (CRITICAL):
    - Add Chrome argument: --disable-blink-features=AutomationControlled
