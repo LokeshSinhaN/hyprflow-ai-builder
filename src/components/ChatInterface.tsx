@@ -171,6 +171,7 @@ export const ChatInterface = () => {
   const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
   const [sopDocuments, setSopDocuments] = useState<SOPDocument[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const [targetUrl, setTargetUrl] = useState("");
@@ -275,6 +276,7 @@ export const ChatInterface = () => {
     await saveMessage("user", userMessage);
 
     setIsProcessing(true);
+    setStatusMessage("Preparing your pre-flight job and scripts...");
 
     try {
       // Build optional SOP context from locally uploaded documents.
@@ -288,6 +290,7 @@ export const ChatInterface = () => {
       if (targetUrl.trim()) {
         // Pre-flight pipeline: create job -> wait for DOM -> generate script with DOM
         const cleaned = targetUrl.trim();
+        setStatusMessage("Starting pre-flight DOM scan for your target URLs...");
         const urlList = cleaned
           .split(/[\n,]+/)
           .map((u) => u.trim())
@@ -302,6 +305,8 @@ export const ChatInterface = () => {
           },
         });
 
+        setStatusMessage("Pre-flight job created. Waiting while we capture the live DOM for you...");
+
         if (startError) throw startError;
         if (!startData?.job?.id) {
           throw new Error("Failed to create pre-flight job.");
@@ -311,6 +316,8 @@ export const ChatInterface = () => {
 
         // Wait for GitHub Action + Selenium to finish DOM extraction
         await waitForPreflightJob(jobId);
+
+        setStatusMessage("DOM captured successfully. Generating final automation scripts...");
 
         const { data: scriptData, error: scriptError } = await supabase.functions.invoke(
           "generate-script-preflight",
@@ -327,6 +334,7 @@ export const ChatInterface = () => {
         functionResponse = scriptData;
       } else {
         // Legacy RAG-only pipeline (no pre-flight DOM)
+        setStatusMessage("Generating automation scripts from your SOP...");
         const { data, error } = await supabase.functions.invoke("generate-script-rag", {
           body: {
             message: userMessage,
@@ -372,10 +380,25 @@ export const ChatInterface = () => {
       }
     } catch (error) {
       console.error("Error generating script:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to generate script. Please try again.");
+      const errorMessage = error instanceof Error ? error.message : "Failed to generate script. Please try again.";
+      toast.error(errorMessage);
+      setStatusMessage(`Something went wrong: ${errorMessage}`);
+
+      // Also surface an assistant message in the chat so the error is visible in history
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant" as const,
+          content:
+            "I ran into an error while preparing your scripts: " +
+            (error instanceof Error ? error.message : "Unknown error."),
+        },
+      ]);
     } finally {
       // Allow user to upload a new SOP or run again after generation completes or fails
       setIsProcessing(false);
+      // Clear transient status after completion (success or failure)
+      setTimeout(() => setStatusMessage(null), 500);
     }
   };
 
@@ -719,8 +742,8 @@ export const ChatInterface = () => {
               <div className="p-3 rounded-full bg-gradient-to-tr from-accent to-primary shadow-glow">
                 <Sparkles className="w-6 h-6 text-primary-foreground animate-pulse" />
               </div>
-              <p className="text-xs text-muted-foreground">
-                Generating scripts with your SOP...
+              <p className="text-xs text-muted-foreground text-center max-w-xs">
+                {statusMessage ?? "Working on your automation scripts. This may take a moment..."}
               </p>
             </div>
           </div>
