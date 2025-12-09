@@ -207,6 +207,13 @@ Generate TWO complete Python automation scripts with UNIVERSAL ANTI-DETECTION ca
 
 ${contextSection ? "CRITICAL: Use the SOP/DOM content above as the source of truth for workflow steps and selectors. Only use selectors that exist in the provided DOM." : ""}
 
+COOKIE / CONSENT POPUPS (DEFENSIVE HANDLING):
+- Pre-flight DOM capture may already have suppressed primary cookie/consent banners using backend-managed cookies.
+- In generated scripts:
+  - Only attempt to interact with cookie/consent banners when corresponding elements actually exist in the DOM.
+  - Always wrap banner handling in try/except; failure to find a banner MUST NOT break the workflow.
+  - Do not hard-code assumptions that a banner will always appear.
+
 ================================================================================
 MANDATORY ANTI-DETECTION FEATURES (MUST INCLUDE IN ALL SCRIPTS)
 ================================================================================

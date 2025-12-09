@@ -68,6 +68,25 @@ serve(async (req) => {
 
       const primaryUrl = urlList[0];
 
+      // Look up any stored cookie profile for this domain from site_cookies
+      let cookiesJsonFromVault: string | null = null;
+      try {
+        const urlObj = new URL(primaryUrl);
+        const host = urlObj.hostname.toLowerCase();
+        const cookieResp = await supabaseFetch(`/rest/v1/site_cookies?domain=eq.${host}&select=cookies_json&limit=1`);
+        if (cookieResp.ok) {
+          const cookieRows = (await cookieResp.json()) as any[];
+          if (cookieRows.length) {
+            cookiesJsonFromVault = cookieRows[0].cookies_json as string;
+          }
+        } else {
+          const text = await cookieResp.text();
+          console.warn("[preflight-job] site_cookies lookup failed", cookieResp.status, text);
+        }
+      } catch (err) {
+        console.warn("[preflight-job] Error resolving site_cookies for", primaryUrl, err);
+      }
+
       // Insert job row
       const insertResp = await supabaseFetch("/rest/v1/preflight_jobs", {
         method: "POST",
@@ -76,12 +95,7 @@ serve(async (req) => {
           target_url: primaryUrl,
           status: "pending",
           target_urls: JSON.stringify(urlList),
-          // Store cookies JSON as a raw string if provided; caller is responsible for sending valid JSON.
-          cookies_json: typeof cookies_json === "string"
-            ? (cookies_json as string)
-            : cookies_json
-            ? JSON.stringify(cookies_json)
-            : null,
+          cookies_json: cookiesJsonFromVault,
         }),
       });
 

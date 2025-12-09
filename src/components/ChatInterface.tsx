@@ -174,7 +174,6 @@ export const ChatInterface = () => {
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const [targetUrl, setTargetUrl] = useState("");
-  const [cookiesJson, setCookiesJson] = useState("");
   const [showPreflightSetup, setShowPreflightSetup] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -300,7 +299,6 @@ export const ChatInterface = () => {
           body: {
             target_url: primaryUrl,
             target_urls: urlList,
-            cookies_json: cookiesJson.trim() || undefined,
           },
         });
 
@@ -665,22 +663,6 @@ export const ChatInterface = () => {
               />
               <p className="text-[10px] text-muted-foreground">
                 Enter one or more URLs from the same domain, separated by newlines or commas. These pages will be scanned during pre-flight.
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="cookies-json" className="font-medium">
-                Auth Cookies JSON (optional)
-              </Label>
-              <Textarea
-                id="cookies-json"
-                value={cookiesJson}
-                onChange={(e) => setCookiesJson(e.target.value)}
-                placeholder="Paste EditThisCookie JSON export here to reuse an existing logged-in session..."
-                className="w-full h-16 text-xs resize-none bg-card/50 border-border/50"
-              />
-              <p className="text-[10px] text-muted-foreground">
-                This JSON is stored only in the current pre-flight job and used by GitHub Actions to access authenticated pages.
               </p>
             </div>
 
