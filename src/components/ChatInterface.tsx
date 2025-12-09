@@ -182,6 +182,20 @@ export const ChatInterface = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
+  const handleTogglePreflight = (checked: boolean) => {
+    setUsePreflight(checked);
+
+    if (checked) {
+      // When enabling pre-flight, reveal the Target URLs UI (if an SOP is available)
+      if (sopDocuments.length > 0) {
+        setShowPreflightSetup(true);
+      }
+    } else {
+      // Turning the toggle off always hides the Target URLs UI
+      setShowPreflightSetup(false);
+    }
+  };
+
   // In auth-free dev mode, conversations and SOPs are kept entirely in local state.
   useEffect(() => {
     // Initialize a blank local conversation on first render
@@ -634,6 +648,77 @@ export const ChatInterface = () => {
           )}
         </div>
 
+        {/* Uploaded SOPs List */}
+        {sopDocuments.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>Uploaded SOPs (this session):</span>
+            {sopDocuments.map((doc) => (
+              <Badge
+                key={doc.id}
+                variant="secondary"
+                className="flex items-center gap-2 max-w-xs"
+              >
+                <span className="truncate">{doc.title}</span>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteSOP(doc.id)}
+                  className="text-[10px] uppercase tracking-wide hover:text-destructive"
+                >
+                  Remove
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        {/* Pre-Flight configuration (only after SOP upload & when toggle is ON) */}
+        {sopDocuments.length > 0 && showPreflightSetup && usePreflight && (
+          <div className="mt-2 space-y-2 text-xs border border-border/50 rounded-md p-3 bg-card/40">
+            <p className="font-medium">Optional Pre-Flight Setup</p>
+            <div className="space-y-1">
+              <Label htmlFor="target-url" className="font-medium">
+                Target URLs (one per line)
+              </Label>
+              <div className="relative">
+                <Textarea
+                  id="target-url"
+                  value={targetUrl}
+                  onChange={(e) => setTargetUrl(e.target.value)}
+                  placeholder={"https://example.com/main\nhttps://example.com/register"}
+                  className="w-full h-16 text-xs resize-none bg-card/50 border-border/50 pr-12 pb-6"
+                />
+                <div className="absolute bottom-2 right-2 flex gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-6 w-6 p-0 rounded-full text-[10px] bg-background/80 border-border/60 hover:bg-background"
+                    onClick={() => {
+                      // Cancel pre-flight for now and hide setup
+                      setUsePreflight(false);
+                      setShowPreflightSetup(false);
+                    }}
+                  >
+                    X
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="premium"
+                    size="icon"
+                    className="h-6 w-6 p-0 rounded-full text-[11px]"
+                    onClick={() => {
+                      // Confirm configuration and return to normal chat UI
+                      setShowPreflightSetup(false);
+                    }}
+                  >
+                    ✓
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Action Buttons */}
         <div className="flex gap-2">
           <Button
@@ -666,74 +751,6 @@ export const ChatInterface = () => {
           </Button>
         </div>
 
-        {/* Uploaded SOPs List */}
-        {sopDocuments.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>Uploaded SOPs (this session):</span>
-            {sopDocuments.map((doc) => (
-              <Badge
-                key={doc.id}
-                variant="secondary"
-                className="flex items-center gap-2 max-w-xs"
-              >
-                <span className="truncate">{doc.title}</span>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteSOP(doc.id)}
-                  className="text-[10px] uppercase tracking-wide hover:text-destructive"
-                >
-                  Remove
-                </button>
-              </Badge>
-            ))}
-          </div>
-        )}
-
-        {/* Pre-Flight configuration (only after SOP upload & when toggle is ON) */}
-        {sopDocuments.length > 0 && showPreflightSetup && usePreflight && (
-          <div className="mt-2 space-y-3 text-xs border border-border/50 rounded-md p-3 bg-card/40">
-            <p className="font-medium">Optional Pre-Flight Setup</p>
-            <div className="space-y-1">
-              <Label htmlFor="target-url" className="font-medium">
-                Target URLs (one per line)
-              </Label>
-              <Textarea
-                id="target-url"
-                value={targetUrl}
-                onChange={(e) => setTargetUrl(e.target.value)}
-                placeholder={"https://example.com/main\nhttps://example.com/register"}
-                className="w-full h-16 text-xs resize-none bg-card/50 border-border/50"
-              />
-              <p className="text-[10px] text-muted-foreground">
-                Enter one or more URLs from the same domain, separated by newlines or commas. These pages will be scanned during pre-flight.
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  // Allow skipping pre-flight; hide setup without clearing current values
-                  setShowPreflightSetup(false);
-                }}
-              >
-                Skip for now
-              </Button>
-              <Button
-                variant="premium"
-                size="sm"
-                onClick={() => {
-                  // Confirm configuration and return to normal chat UI
-                  setShowPreflightSetup(false);
-                }}
-              >
-                Go
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* Input Area */}
         <div className="flex gap-2 mt-2 items-end">
           <div className="flex-1 relative">
@@ -750,16 +767,16 @@ export const ChatInterface = () => {
               }}
             />
             {/* Target URLs toggle lives inside the prompt box, anchored to the bottom-left */}
-            <div className="pointer-events-none absolute left-3 bottom-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <div className="pointer-events-none absolute left-3 bottom-2 flex items-center gap-1 text-[10px] text-muted-foreground">
               <Switch
                 id="toggle-preflight"
                 checked={usePreflight}
-                onCheckedChange={setUsePreflight}
-                className="pointer-events-auto h-4 w-7 data-[state=checked]:bg-accent data-[state=checked]:border-accent"
+                onCheckedChange={handleTogglePreflight}
+                className="pointer-events-auto h-3 w-6 data-[state=checked]:bg-accent data-[state=checked]:border-accent transition-transform hover:scale-105"
               />
               <Label
                 htmlFor="toggle-preflight"
-                className="pointer-events-auto text-[11px] cursor-pointer select-none"
+                className="pointer-events-auto text-[10px] leading-none cursor-pointer select-none"
               >
                 Target URLs (enable pre-flight DOM capture)
               </Label>
