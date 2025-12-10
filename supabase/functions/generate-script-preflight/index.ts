@@ -250,6 +250,10 @@ COOKIE / CONSENT POPUPS (DEFENSIVE HANDLING):
   - Only attempt to interact with cookie/consent banners when corresponding elements actually exist in the DOM.
   - Always wrap banner handling in try/except; failure to find a banner MUST NOT break the workflow.
   - Do not hard-code assumptions that a banner will always appear.
+  - AFTER clicking a cookie/consent button or container, you MUST wait for the banner container to become invisible using:
+    WebDriverWait(driver, TIMEOUT).until(EC.invisibility_of_element_located((By.ID, "THE_BANNER_CONTAINER_ID")))
+    (or an equivalent locator when id is not available).
+  - Never proceed to the next click on the underlying page until the invisibility wait above has completed, otherwise ElementClickIntercepted errors will occur.
 ${cookiesRuntimeNote}
 
 ================================================================================
@@ -271,16 +275,22 @@ CRITICAL SELECTOR RULES (UNIVERSAL ROBUSTNESS):
    - REASON: Redirect URLs (e.g., 'google.com/url?q=...') will fail such filters.
    - LOGIC: If the element matches the selector (e.g., 'li.result a'), click it regardless of href text.
 
-3. IGNORE WHITESPACE FORMATTING:
-   - Websites often split text across lines or insert extra whitespace.
-   - NEVER rely on exact text matches when using XPath.
-   - ALWAYS use normalize-space() when matching by text so that "Health\nLibrary" and "Health Library" are treated the same.
-   - BAD: //button[contains(text(), 'Submit')]
-   - GOOD: //button[contains(normalize-space(), 'Submit')]
+3. TEXT MATCHING MUST BE ROBUST (NORMALIZE WHITESPACE):
+   - The DOM context provides "clean" text (e.g., "Health Library"), but the live site may contain newlines or extra spaces ("Health \n Library").
+   - You MUST normalize whitespace when using XPath text matching.
+   - STRICTLY FORBIDDEN: //tag[contains(text(), 'Value')] or any XPath that does NOT use normalize-space().
+   - REQUIRED PATTERN: //tag[contains(normalize-space(.), 'Value')]
+   - Example BAD: //button[contains(text(), 'Submit')]
+   - Example GOOD: //button[contains(normalize-space(.), 'Submit')]
 
-4. RESILIENT LOCATORS:
+4. SELECTOR PRIORITY (ID FIRST, THEN NORMALIZED XPATH):
+   - IF an element in the DOM context has an id attribute, you MUST use By.ID("that-id") as the primary locator.
+   - ONLY if no id is available, use a robust XPath with normalize-space(.) on the visible text or role.
+   - Do NOT invent generic XPaths if the DOM context already provides a concrete id or data-testid.
+
+5. RESILIENT LOCATORS FOR LISTS:
    - Prefer CSS selectors for lists: driver.find_elements(By.CSS_SELECTOR, "ul.search-results li a")
-   - Use XPath only for text matching: //button[contains(normalize-space(), 'Submit')]
+   - Use XPath with normalize-space(.) only for text matching on individual items.
 
 1. ANTI-BOT CHROME OPTIONS (CRITICAL):
    - Add Chrome argument: --disable-blink-features=AutomationControlled
@@ -565,10 +575,12 @@ Generate TWO complete, production-ready Python scripts (Selenium and Playwright)
 
 CRITICAL REQUIREMENTS CHECKLIST:
 ✓ Include create_stealth_driver() and create_stealth_browser() functions with ALL anti-detection options listed above
-✓ For each critical element (username, password, submit button, etc.), use a defensive locator pattern:
-  - Primary: WebDriverWait with the exact id from the DOM.
-  - Secondary: in except block, WebDriverWait using name or data-testid.
-  - Tertiary: in a second except block, WebDriverWait using a robust XPath based on visible text or role.
+✓ For each critical element (username, password, cookie banner button, navigation button, etc.), use a defensive locator pattern:
+  - Primary: WebDriverWait with the exact id from the DOM (By.ID is mandatory when id exists).
+  - Secondary: in except block, WebDriverWait using name or data-testid from the DOM.
+  - Tertiary: in a second except block, WebDriverWait using a robust XPath based on normalize-space(.) of the visible text or role.
+✓ TEXT MATCHING: NEVER use //tag[contains(text(), 'Value')]; ALWAYS use //tag[contains(normalize-space(.), 'Value')].
+✓ BANNER HANDLING: After clicking a cookie/consent banner button or container, you MUST wait for the banner container to become invisible using EC.invisibility_of_element_located(...) before interacting with underlying elements.
 ✓ NEVER combine expected_conditions with Python boolean operators. Do NOT write expressions like EC.title_contains(...) or EC.presence_of_element_located(...) inside .until(). Each .until() call must receive a single expected condition; use try/except to express alternatives instead.
 ✓ Add time.sleep(2-3) delays between ALL major actions (navigation, clicks, form submissions)
 ✓ Use WebDriverWait with explicit conditions (EC) for ALL element interactions - no bare element finds
