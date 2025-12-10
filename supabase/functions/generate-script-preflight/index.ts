@@ -92,6 +92,11 @@ serve(async (req) => {
     const job = rows[0];
     console.log("ℹ️ Preflight job status", job.status);
 
+    const hasCookiesProfile = typeof job.cookies_json === "string" && job.cookies_json.trim().length > 0;
+    if (hasCookiesProfile) {
+      console.log("🍪 Cookies profile detected for preflight job; instructing LLM to use dynamic cookies injection.");
+    }
+
     if (job.status !== "done") {
       return new Response(
         JSON.stringify({ error: `Preflight job is not complete (status=${job.status})` }),
@@ -204,6 +209,15 @@ serve(async (req) => {
       ? `\n\n=== COMPLETE WORKFLOW + DOM CONTEXT ===\n${combinedContext}\n=== END CONTEXT ===\n`
       : "";
 
+    const cookiesRuntimeNote = hasCookiesProfile
+      ? `\nRUNTIME COOKIES PROFILE (MANDATORY USAGE):\n` +
+        `- A validated cookies_json profile for this domain is stored in the backend (Supabase).\n` +
+        `- DO NOT inline or hard-code any cookie values from this profile directly into the script.\n` +
+        `- Instead, the script MUST load cookies dynamically at runtime from a JSON string (for example, an environment variable like BROWSER_COOKIES_JSON or an injected config value).\n` +
+        `- Then, before visiting any target URL, the script MUST parse that JSON and add each cookie to the browser context (Selenium driver or Playwright context) using the provided name, value, domain, and path fields.\n` +
+        `- If the JSON is missing or empty at runtime, the script must continue without failing but should log a clear warning.\n`
+      : "";
+
     // ENHANCED SYSTEM PROMPT (copied from generate-script-rag) WITH DOM NOTE
     const systemPrompt = `You are an expert web automation engineer specializing in production-ready, CAPTCHA-RESISTANT browser automation.
 
@@ -217,6 +231,7 @@ COOKIE / CONSENT POPUPS (DEFENSIVE HANDLING):
   - Only attempt to interact with cookie/consent banners when corresponding elements actually exist in the DOM.
   - Always wrap banner handling in try/except; failure to find a banner MUST NOT break the workflow.
   - Do not hard-code assumptions that a banner will always appear.
+${cookiesRuntimeNote}
 
 ================================================================================
 MANDATORY ANTI-DETECTION FEATURES (MUST INCLUDE IN ALL SCRIPTS)
@@ -545,6 +560,7 @@ CRITICAL REQUIREMENTS CHECKLIST:
 ✓ Ready to run after user updates CHROME_DRIVER_PATH and credentials ONLY
 ✓ Works without CAPTCHA on ALL websites (Google, portals, e-commerce, etc.)
 ✓ Output raw Python code between delimiters - NO markdown code fences
+${hasCookiesProfile ? "✓ Scripts MUST load cookies_json dynamically at runtime (e.g., from a BROWSER_COOKIES_JSON environment variable) and inject them into the browser context before the first navigation, without hard-coding cookie values.\n" : ""}
 
 ${contextSection ? "IMPORTANT: Follow the SOP/DOM workflow order exactly. Preserve all URLs, selectors, field names, and button labels from the context." : ""}
 
@@ -745,6 +761,7 @@ Generate complete, CAPTCHA-resistant scripts now.`;
         retrieval_method: "preflight_dom_long_context",
         parsing_method: "primary-markers",
         anti_captcha_enabled: true,
+        cookies_profile_present: hasCookiesProfile,
         features: [
           "anti-bot-chrome-options",
           "human-like-timing",

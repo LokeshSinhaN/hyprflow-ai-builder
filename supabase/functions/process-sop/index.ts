@@ -44,7 +44,71 @@ serve(async (req) => {
 
     console.log(`Extracted ${cleanedText.length} characters from ${doc.numPages} pages`);
 
-    // OPTIONAL: Generate structured summary using Gemini API directly (purely for convenience)
+    // Try to detect Target URLs section from the SOP template
+    const extractTargetUrlsFromText = (text: string): string[] => {
+      const lines = text.split("\n");
+      const headingIndex = lines.findIndex((line) => /target urls?/i.test(line));
+
+      if (headingIndex === -1) {
+        console.log("No 'Target URLs' heading found.");
+        return [];
+      }
+
+      const urlRegex = /https?:\/\/[^\s)>"']+/gi;
+      const urls = new Set<string>();
+      
+      // Look at lines after the heading
+      for (let i = headingIndex + 1; i < lines.length; i++) {
+        let line = lines[i].trim();
+
+        // FIX: If the line is empty, just skip it. Do NOT break.
+        if (!line) continue;
+
+        // Stop if we hit an obvious NEW section heading
+        const isHeading = /^[A-Z][A-Za-z0-9\s]{0,60}:?$/.test(line);
+        const looksLikeUrl = /https?:\/\//i.test(line);
+
+        if (isHeading && !looksLikeUrl) {
+            // We hit a new section, stop looking.
+            break;
+        }
+
+        // FIX: Check for split URLs (PDF wrapping artifacts)
+        // If the next line is a short fragment (e.g., "524", "html"), merge it.
+        if (i + 1 < lines.length) {
+           const nextLine = lines[i+1].trim();
+           // Regex matches short alphanumeric strings that might be URL tails
+           const isFragment = /^[a-zA-Z0-9\-_./]{1,15}$/.test(nextLine);
+           
+           if (isFragment && looksLikeUrl) {
+              // Merge the lines
+              line += nextLine;
+              // Skip the next line in the loop since we just consumed it
+              i++; 
+           }
+        }
+
+        const matches = line.match(urlRegex);
+        if (matches) {
+          for (const match of matches) {
+            const normalized = match.trim();
+            // Remove trailing punctuation that might get caught
+            const cleanUrl = normalized.replace(/[.,;]$/, "");
+            if (cleanUrl) {
+              urls.add(cleanUrl);
+            }
+          }
+        }
+      }
+
+      const result = Array.from(urls);
+      console.log(`Detected ${result.length} target URL(s) from SOP text`);
+      return result;
+    };
+
+    const targetUrls = extractTargetUrlsFromText(cleanedText);
+
+    // OPTIONAL: Generate structured summary using Gemini API
     let sopSummary: string | null = null;
 
     if (geminiApiKey && cleanedText.length > 5000) {
@@ -116,6 +180,7 @@ serve(async (req) => {
         summaryLength: sopSummary?.length || 0,
         fullContent: cleanedText,
         summary: sopSummary,
+        targetUrls,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

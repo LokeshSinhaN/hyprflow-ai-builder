@@ -22,6 +22,7 @@ interface SOPDocument {
   status: "uploaded" | "processing" | "indexed" | "failed";
   created_at: string;
   content?: string; // Local-only SOP content for context (not persisted)
+  targetUrls?: string[]; // Target URLs parsed from the SOP template (if available)
 }
 
 type ScriptConfigEntry = {
@@ -176,6 +177,7 @@ export const ChatInterface = () => {
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const [targetUrl, setTargetUrl] = useState("");
+  const [autoTargetUrls, setAutoTargetUrls] = useState<string[]>([]);
   const [showPreflightSetup, setShowPreflightSetup] = useState(false);
   const [usePreflight, setUsePreflight] = useState(false);
   const [lastPreflightJobId, setLastPreflightJobId] = useState<string | null>(null);
@@ -189,6 +191,11 @@ export const ChatInterface = () => {
       // When enabling pre-flight, reveal the Target URLs UI (if an SOP is available)
       if (sopDocuments.length > 0) {
         setShowPreflightSetup(true);
+      }
+
+      // If we have auto-detected Target URLs but the textarea is empty, seed it for the user
+      if (autoTargetUrls.length > 0 && !targetUrl.trim()) {
+        setTargetUrl(autoTargetUrls.join("\n"));
       }
     } else {
       // Turning the toggle off always hides the Target URLs UI
@@ -210,6 +217,10 @@ export const ChatInterface = () => {
       const updated = prev.filter((doc) => doc.id !== sopId);
       if (updated.length === 0) {
         setUploadedDocument(null);
+        setAutoTargetUrls([]);
+        setTargetUrl("");
+        setUsePreflight(false);
+        setShowPreflightSetup(false);
       }
       return updated;
     });
@@ -259,7 +270,9 @@ export const ChatInterface = () => {
     setShowConfigForm(false);
     setConfigEntries([]);
     setTargetUrl("");
+    setAutoTargetUrls([]);
     setUsePreflight(false);
+    setShowPreflightSetup(false);
     setLastPreflightJobId(null);
   };
 
@@ -472,6 +485,10 @@ export const ChatInterface = () => {
 
     if (data.error) throw new Error(data.error);
 
+    const parsedTargetUrls: string[] = Array.isArray(data.targetUrls)
+      ? data.targetUrls.map((u: unknown) => String(u).trim()).filter((u: string) => u.length > 0)
+      : [];
+
     toast.dismiss(loadingToast);
     toast.success(
       `SOP "${data.title || file.name}" uploaded successfully and processed for this session.`,
@@ -485,13 +502,25 @@ export const ChatInterface = () => {
       status: "indexed",
       created_at: new Date().toISOString(),
       content: data.fullContent || data.content || "",
+      targetUrls: parsedTargetUrls,
     };
 
     setSopDocuments((prev) => [newDoc, ...prev]);
     setUploadedDocument(newDoc.title);
-    setShowPreflightSetup(true);
-    setTargetUrl("");
-    setUsePreflight(false);
+    setAutoTargetUrls(parsedTargetUrls);
+
+    if (parsedTargetUrls.length > 0) {
+      // Auto-enable pre-flight with the SOP-provided Target URLs, but let the user turn it off.
+      setTargetUrl(parsedTargetUrls.join("\n"));
+      setUsePreflight(true);
+      setShowPreflightSetup(true);
+    } else {
+      // No Target URLs found in the SOP; user can still enable pre-flight manually via the toggle.
+      setTargetUrl("");
+      setUsePreflight(false);
+      setShowPreflightSetup(false);
+    }
+
     setLastPreflightJobId(null);
 
     // Set suggested message
@@ -778,7 +807,11 @@ export const ChatInterface = () => {
                 htmlFor="toggle-preflight"
                 className="pointer-events-auto text-[10px] leading-none cursor-pointer select-none"
               >
-                Target URLs (enable pre-flight DOM capture)
+                {sopDocuments.length > 0
+                  ? autoTargetUrls.length > 0
+                    ? `Target URLs (${autoTargetUrls.length} found)`
+                    : "Target URLs not found"
+                  : "Target URLs (enable pre-flight DOM capture)"}
               </Label>
             </div>
           </div>
