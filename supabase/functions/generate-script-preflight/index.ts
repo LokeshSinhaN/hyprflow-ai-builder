@@ -128,9 +128,11 @@ serve(async (req) => {
 
     let domContext = "";
 
+    const hasScoredDom = !!structuredExtraction;
+
     if (structuredExtraction) {
       const maxPages = 5;
-      const maxElementsPerPage = 300;
+      const maxElementsPerPage = 80;
       const entries = Object.entries(structuredExtraction).slice(0, maxPages);
 
       const parts: string[] = [];
@@ -141,14 +143,18 @@ serve(async (req) => {
         const elements = Array.isArray(page.interactive_elements) ? page.interactive_elements : [];
 
         parts.push(`\n\n=== PAGE: ${url} (Title: ${title}) ===`);
-        parts.push(`Total interactive elements detected: ${page.element_count ?? elements.length}`);
-        parts.push("INTERACTIVE ELEMENTS (truncated):");
+        parts.push(`Total interactive elements (SOP-guided + scored): ${page.element_count ?? elements.length}`);
+        parts.push("INTERACTIVE ELEMENTS (pre-filtered & scored):");
 
         for (const el of elements.slice(0, maxElementsPerPage)) {
           const tag = el.tag ?? "";
-          const text = (el.text ?? "").toString().slice(0, 120);
+          const text = (el.text ?? "").toString().slice(0, 160);
           const attrs = el.attributes ?? {};
           const selector = el.suggested_selector ?? "";
+          const score = typeof el.score === "number" ? el.score : undefined;
+          const matchReasons: string[] = Array.isArray(el.match_reasons)
+            ? (el.match_reasons as string[])
+            : [];
 
           const attrBits: string[] = [];
           if (attrs.id) attrBits.push(`id=\"${attrs.id}\"`);
@@ -167,6 +173,18 @@ serve(async (req) => {
           if (selector) {
             line += ` -> SUGGESTED SELECTOR: ${selector}`;
           }
+
+          const metaBits: string[] = [];
+          if (typeof score === "number") {
+            metaBits.push(`score=${score}`);
+          }
+          if (matchReasons.length) {
+            metaBits.push(`matches: ${matchReasons.join("; ")}`);
+          }
+          if (metaBits.length) {
+            line += ` [${metaBits.join(" | ")}]`;
+          }
+
           parts.push(line);
         }
       }
@@ -224,6 +242,7 @@ serve(async (req) => {
 Generate TWO complete Python automation scripts with UNIVERSAL ANTI-DETECTION capabilities that work for ANY website.
 
 ${contextSection ? "CRITICAL: Use the SOP/DOM content above as the source of truth for workflow steps and selectors. Only use selectors that exist in the provided DOM." : ""}
+${hasScoredDom ? "CRITICAL: The DOM elements provided were PRE-FILTERED and SCORED against the SOP text and defensive keywords (cookies, login, etc.). ALWAYS prioritize these pre-validated selectors and attributes over guessing new selectors or generic XPaths. When match_reasons mention cookies or login, you MUST use those elements to unblock the workflow before proceeding." : ""}
 
 COOKIE / CONSENT POPUPS (DEFENSIVE HANDLING):
 - Pre-flight DOM capture may already have suppressed primary cookie/consent banners using backend-managed cookies.

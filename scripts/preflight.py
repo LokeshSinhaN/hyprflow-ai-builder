@@ -10,6 +10,76 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
 
+# Basic English stopwords for SOP keyword extraction
+STOPWORDS: set[str] = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "this",
+    "that",
+    "from",
+    "into",
+    "onto",
+    "your",
+    "you",
+    "are",
+    "was",
+    "were",
+    "will",
+    "shall",
+    "should",
+    "have",
+    "has",
+    "had",
+    "not",
+    "but",
+    "all",
+    "any",
+    "each",
+    "every",
+    "such",
+    "may",
+    "might",
+    "can",
+    "could",
+    "must",
+    "then",
+    "than",
+    "when",
+    "where",
+    "what",
+    "which",
+    "while",
+    "before",
+    "after",
+    "during",
+    "within",
+    "including",
+}
+
+# Defensive keywords for blockers like cookie banners and logins
+DEFENSIVE_KEYWORDS: list[str] = [
+    "cookie",
+    "cookies",
+    "accept",
+    "agree",
+    "consent",
+    "privacy",
+    "continue",
+    "ok",
+    "got it",
+    "close",
+    "dismiss",
+    "login",
+    "log in",
+    "sign in",
+    "sign-in",
+    "signin",
+    "password",
+    "username",
+]
+
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 JOB_ID = os.environ["PREFLIGHT_JOB_ID"]
@@ -42,22 +112,42 @@ def fetch_job() -> dict:
     return rows[0]
 
 
-def get_optimized_elements(html_content: str, base_url: str):
-    """Return only interactive / important elements with suggested selectors.
+def extract_sop_keywords(sop_text: str) -> set[str]:
+    """Extract a set of meaningful, lowercased keywords from SOP text.
 
-    This dramatically shrinks what we store and send to the LLM compared to raw page_source.
+    We strip punctuation, split on whitespace, drop stopwords, and ignore very short tokens.
+    """
+    cleaned = []
+    for ch in sop_text.lower():
+        cleaned.append(ch if ch.isalnum() or ch.isspace() else " ")
+    tokens = [t for t in "".join(cleaned).split() if len(t) >= 3]
+    return {t for t in tokens if t not in STOPWORDS}
+
+
+def get_optimized_elements(html_content: str, base_url: str, sop_text: str | None = None):
+    """Return a small, SOP-guided set of interactive / important elements with scores.
+
+    Each element is scored based on:
+      - base score for being interactive,
+      - matches against SOP-derived keywords,
+      - matches against defensive keywords (cookies, login, etc.).
+
+    Only elements above a minimum score are kept, then sorted and truncated to top-N.
     """
     soup = BeautifulSoup(html_content, "lxml")
-    interactive_elements = []
+    interactive_elements: list[dict] = []
 
     tags_of_interest = ["button", "input", "select", "textarea", "a", "form"]
     attrs_of_interest = ["id", "data-testid", "role", "name", "aria-label", "placeholder"]
+
+    sop_keywords: set[str] = extract_sop_keywords(sop_text) if sop_text else set()
 
     for element in soup.find_all():
         if element.name in ["script", "style", "noscript", "svg", "path"]:
             continue
 
-        is_interesting = element.name in tags_of_interest
+        is_interactive_tag = element.name in tags_of_interest
+        is_interesting = is_interactive_tag
         if not is_interesting:
             for attr in attrs_of_interest:
                 if element.has_attr(attr):
@@ -83,10 +173,61 @@ def get_optimized_elements(html_content: str, base_url: str):
                 # Best-effort normalization; if urljoin fails we keep the original value.
                 pass
 
-        el_data = {
+        text = element.get_text(" ", strip=True)
+        attrs = {k: v for k, v in element.attrs.items() if k != "style"}
+
+        # Discard completely empty elements early
+        if not text and not attrs:
+            continue
+
+        display_text = text[:160]
+
+        score = 0
+        match_reasons: list[str] = []
+
+        # Base score for interactive tags
+        if is_interactive_tag:
+            score += 5
+            match_reasons.append("Interactive tag")
+
+        lower_blob_parts = [display_text.lower()]
+        for v in attrs.values():
+            try:
+                lower_blob_parts.append(str(v).lower())
+            except Exception:
+                continue
+        lower_blob = " ".join(lower_blob_parts)
+
+        # SOP keyword matches
+        sop_hits = []
+        for kw in sop_keywords:
+            if kw in lower_blob:
+                sop_hits.append(kw)
+                if len(sop_hits) >= 3:
+                    break
+        if sop_hits:
+            score += 10 * len(sop_hits)
+            match_reasons.append(f"SOP match: {', '.join(sorted(set(sop_hits)))}")
+
+        # Defensive keyword matches (cookies, login, etc.)
+        defensive_hits = []
+        for kw in DEFENSIVE_KEYWORDS:
+            if kw in lower_blob:
+                defensive_hits.append(kw)
+        if defensive_hits:
+            score += 15 * len(defensive_hits)
+            match_reasons.append(f"Defensive match: {', '.join(sorted(set(defensive_hits)))}")
+
+        # Drop elements that are effectively noise
+        if score < 5:
+            continue
+
+        el_data: dict = {
             "tag": element.name,
-            "text": element.get_text(" ", strip=True)[:100],
-            "attributes": {k: v for k, v in element.attrs.items() if k != "style"},
+            "text": display_text,
+            "attributes": attrs,
+            "score": score,
+            "match_reasons": match_reasons,
         }
 
         selector = None
@@ -96,14 +237,17 @@ def get_optimized_elements(html_content: str, base_url: str):
             selector = f"[name='{element['name']}']"
         elif element.has_attr("data-testid"):
             selector = f"[data-testid='{element['data-testid']}']"
-        elif element.name == "button" and el_data["text"]:
-            clean_text = el_data["text"].replace("'", "")
-            selector = f"//button[contains(text(), '{clean_text}')]"
+        elif element.name == "button" and display_text:
+            clean_text = display_text.replace("'", "")
+            selector = f"//button[contains(normalize-space(), '{clean_text}') ]"
 
         el_data["suggested_selector"] = selector
         interactive_elements.append(el_data)
 
-    return interactive_elements
+    # Sort by score descending and truncate to top-N to avoid context pollution
+    interactive_elements.sort(key=lambda e: e.get("score", 0), reverse=True)
+    MAX_ELEMENTS = 50
+    return interactive_elements[:MAX_ELEMENTS]
 
 
 def main() -> None:
@@ -137,6 +281,9 @@ def main() -> None:
         except Exception:
             print("[Preflight] Warning: could not parse cookies_json; proceeding without cookies")
             cookies = []
+
+        # Optional: SOP content can be provided via environment for smarter filtering
+        sop_text = os.environ.get("PREFLIGHT_SOP_TEXT", "")
 
         options = Options()
         options.add_argument("--headless=new")
@@ -186,8 +333,8 @@ def main() -> None:
 
                 html = driver.page_source
                 title = driver.title
-                # Use the resolved current_url as base for href normalization
-                elements = get_optimized_elements(html, driver.current_url)
+                # Use the resolved current_url as base for href normalization and SOP-guided scoring
+                elements = get_optimized_elements(html, driver.current_url, sop_text)
 
                 extraction_results[url] = {
                     "title": title,
