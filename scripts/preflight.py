@@ -8,6 +8,10 @@ from urllib.parse import urljoin
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 from bs4 import BeautifulSoup
 
 # Basic English stopwords for SOP keyword extraction
@@ -122,6 +126,51 @@ def extract_sop_keywords(sop_text: str) -> set[str]:
         cleaned.append(ch if ch.isalnum() or ch.isspace() else " ")
     tokens = [t for t in "".join(cleaned).split() if len(t) >= 3]
     return {t for t in tokens if t not in STOPWORDS}
+
+
+def wait_for_sop_keywords_on_page(driver: webdriver.Chrome, sop_keywords: set[str], timeout: int = 20) -> None:
+    """Block until at least one SOP keyword appears in the live page text, or timeout.
+
+    This makes the pre-flight capture "context aware" so that slowly-rendered forms
+    (e.g., Height/Weight/Calculate widgets) get a chance to appear before we snapshot.
+    """
+    if not sop_keywords:
+        return
+
+    important = [kw.strip().lower() for kw in sop_keywords if kw.strip()]
+    if not important:
+        return
+
+    # Limit to a reasonable number of high-signal keywords
+    important = important[:15]
+
+    deadline = time.time() + timeout
+    last_hit: list[str] | None = None
+
+    while time.time() < deadline:
+        try:
+            page_text = driver.page_source.lower()
+        except Exception as exc:  # pragma: no cover - extremely rare in practice
+            print(f"[Preflight] Warning: failed to read page_source while waiting for SOP keywords: {exc}")
+            break
+
+        hits = [kw for kw in important if kw in page_text]
+        if hits:
+            last_hit = hits
+            print(
+                "[Preflight] SOP keywords visible on page:",
+                ", ".join(sorted(set(hits))),
+            )
+            return
+
+        time.sleep(1.0)
+
+    if last_hit:
+        print(
+            "[Preflight] SOP keywords previously detected but disappeared before timeout; proceeding anyway.",
+        )
+    else:
+        print("[Preflight] Warning: SOP keywords not detected before timeout; proceeding anyway.")
 
 
 def get_optimized_elements(html_content: str, base_url: str, sop_text: str | None = None):
@@ -244,8 +293,14 @@ def get_optimized_elements(html_content: str, base_url: str, sop_text: str | Non
         el_data["suggested_selector"] = selector
         interactive_elements.append(el_data)
 
-    # Sort by score descending and truncate to top-N to avoid context pollution
-    interactive_elements.sort(key=lambda e: e.get("score", 0), reverse=True)
+    # Sort by SOP relevance first, then score, and truncate to top-N to avoid context pollution
+    interactive_elements.sort(
+        key=lambda e: (
+            any("SOP match" in r for r in e.get("match_reasons", [])),
+            e.get("score", 0),
+        ),
+        reverse=True,
+    )
     MAX_ELEMENTS = 50
     return interactive_elements[:MAX_ELEMENTS]
 
@@ -284,6 +339,7 @@ def main() -> None:
 
         # Optional: SOP content can be provided via environment for smarter filtering
         sop_text = os.environ.get("PREFLIGHT_SOP_TEXT", "")
+        sop_keywords_main: set[str] = extract_sop_keywords(sop_text) if sop_text else set()
 
         options = Options()
         options.add_argument("--headless=new")
@@ -329,7 +385,14 @@ def main() -> None:
             for url in target_urls:
                 print(f"[Preflight] Visiting {url}")
                 driver.get(url)
-                time.sleep(5)
+                # Base wait for initial load
+                time.sleep(2)
+                # Smart wait: give SOP-relevant widgets (e.g., Height/Weight/Calculate) time to appear
+                try:
+                    wait_for_sop_keywords_on_page(driver, sop_keywords_main, timeout=20)
+                except TimeoutException:
+                    # Fallback: we already log inside wait_for_sop_keywords_on_page
+                    pass
 
                 html = driver.page_source
                 title = driver.title
