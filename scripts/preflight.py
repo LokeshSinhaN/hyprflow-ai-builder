@@ -2,6 +2,7 @@ import os
 import json
 import time
 import traceback
+import re
 
 from urllib.parse import urljoin
 
@@ -116,16 +117,33 @@ def fetch_job() -> dict:
     return rows[0]
 
 
-def extract_sop_keywords(sop_text: str) -> set[str]:
-    """Extract a set of meaningful, lowercased keywords from SOP text.
+def extract_sop_targets(sop_text: str) -> dict:
+    """Extract explicit targets from SOP.
 
-    We strip punctuation, split on whitespace, drop stopwords, and ignore very short tokens.
+    Returns a dict with 'keywords' (set) and 'phrases' (list).
     """
+    if not sop_text:
+        return {"keywords": set(), "phrases": []}
+
+    # 1. Extract exact quoted text (e.g., "Submit Order") - HIGHEST PRIORITY
+    phrases = re.findall(r'["\'](.*?)["\']', sop_text)
+
+    # 2. Extract Capitalized Words (heuristics for UI labels)
+    cap_words = re.findall(r'\b[A-Z][a-z]+\b', sop_text)
+
+    # 3. Standard tokenization for fallback
     cleaned = []
     for ch in sop_text.lower():
         cleaned.append(ch if ch.isalnum() or ch.isspace() else " ")
     tokens = [t for t in "".join(cleaned).split() if len(t) >= 3]
-    return {t for t in tokens if t not in STOPWORDS}
+
+    keywords = {t for t in tokens if t not in STOPWORDS}
+
+    # Add capitalized words to keywords for broader matching
+    for w in cap_words:
+        keywords.add(w.lower())
+
+    return {"keywords": keywords, "phrases": phrases}
 
 
 def wait_for_sop_keywords_on_page(driver: webdriver.Chrome, sop_keywords: set[str], timeout: int = 20) -> None:
@@ -178,7 +196,7 @@ def get_optimized_elements(html_content: str, base_url: str, sop_text: str | Non
 
     Each element is scored based on:
       - base score for being interactive,
-      - matches against SOP-derived keywords,
+      - matches against SOP-derived keywords and phrases,
       - matches against defensive keywords (cookies, login, etc.).
 
     Only elements above a minimum score are kept, then sorted and truncated to top-N.
@@ -189,7 +207,10 @@ def get_optimized_elements(html_content: str, base_url: str, sop_text: str | Non
     tags_of_interest = ["button", "input", "select", "textarea", "a", "form"]
     attrs_of_interest = ["id", "data-testid", "role", "name", "aria-label", "placeholder"]
 
-    sop_keywords: set[str] = extract_sop_keywords(sop_text) if sop_text else set()
+    # UPDATED: Parse SOP targets using the new function
+    sop_data = extract_sop_targets(sop_text) if sop_text else {"keywords": set(), "phrases": []}
+    sop_keywords: set[str] = sop_data["keywords"]
+    sop_phrases = [p.lower() for p in sop_data["phrases"]]
 
     for element in soup.find_all():
         if element.name in ["script", "style", "noscript", "svg", "path"]:
@@ -231,35 +252,53 @@ def get_optimized_elements(html_content: str, base_url: str, sop_text: str | Non
 
         display_text = text[:160]
 
+        # IMPROVEMENT: search blob now includes title, alt, value, placeholder, etc.
+        lower_blob_parts = [display_text.lower()]
+        for attr_name in [
+            "id",
+            "name",
+            "data-testid",
+            "aria-label",
+            "placeholder",
+            "title",
+            "alt",
+            "value",
+        ]:
+            val = attrs.get(attr_name)
+            if val:
+                try:
+                    lower_blob_parts.append(str(val).lower())
+                except Exception:
+                    continue
+        lower_blob = " ".join(lower_blob_parts)
+
+        # SCORING UPGRADE
         score = 0
         match_reasons: list[str] = []
 
-        # Base score for interactive tags
         if is_interactive_tag:
             score += 5
-            match_reasons.append("Interactive tag")
+            match_reasons.append("Interactive")
 
-        lower_blob_parts = [display_text.lower()]
-        for v in attrs.values():
-            try:
-                lower_blob_parts.append(str(v).lower())
-            except Exception:
-                continue
-        lower_blob = " ".join(lower_blob_parts)
+        # 1. Exact Phrase Match (HUGE BOOST)
+        for phrase in sop_phrases:
+            if phrase and phrase in lower_blob:
+                score += 50  # massive boost ensures it survives truncation
+                match_reasons.append(f"SOP EXACT MATCH: '{phrase}'")
+                break
 
-        # SOP keyword matches
-        sop_hits = []
+        # 2. Keyword Match
+        sop_hits: list[str] = []
         for kw in sop_keywords:
             if kw in lower_blob:
                 sop_hits.append(kw)
-                if len(sop_hits) >= 3:
-                    break
         if sop_hits:
-            score += 10 * len(sop_hits)
-            match_reasons.append(f"SOP match: {', '.join(sorted(set(sop_hits)))}")
+            capped = sop_hits[:3]
+            score += 10 * min(len(capped), 3)
+            match_reasons.append(f"SOP Keywords: {','.join(capped)}")
 
-        # Defensive keyword matches (cookies, login, etc.)
-        defensive_hits = []
+        # 3. Defensive keyword matches (cookies, login, etc.)
+        defensive_hits: list[str] = []
         for kw in DEFENSIVE_KEYWORDS:
             if kw in lower_blob:
                 defensive_hits.append(kw)
@@ -271,32 +310,52 @@ def get_optimized_elements(html_content: str, base_url: str, sop_text: str | Non
         if score < 5:
             continue
 
+        # SELECTOR GENERATION UPGRADE
+        selector = None
+
+        # 1. ID is still King
+        if element.has_attr("id"):
+            selector = f"#{element['id']}"
+
+        # 2. Robust Text/Attribute XPaths
+        if not selector:
+            clean_text = display_text.replace("'", "").strip()
+
+            # Button or Link with text
+            if (element.name in ("button", "a")) and clean_text:
+                selector = f"//{element.name}[contains(normalize-space(), '{clean_text}') ]"
+
+            # Input with Placeholder
+            elif element.name == "input" and attrs.get("placeholder"):
+                selector = f"//input[@placeholder='{attrs['placeholder']}']"
+
+            # Input with Name
+            elif element.name == "input" and attrs.get("name"):
+                selector = f"//input[@name='{attrs['name']}']"
+
+            # Submit Input with Value
+            elif element.name == "input" and attrs.get("type") == "submit" and attrs.get("value"):
+                selector = f"//input[@value='{attrs['value']}']"
+
+            # Div/Span acting as button
+            elif attrs.get("role") == "button" and clean_text:
+                selector = f"//{element.name}[@role='button' and contains(normalize-space(), '{clean_text}') ]"
+
         el_data: dict = {
             "tag": element.name,
             "text": display_text,
             "attributes": attrs,
             "score": score,
+            "suggested_selector": selector,
             "match_reasons": match_reasons,
         }
 
-        selector = None
-        if element.has_attr("id"):
-            selector = f"#{element['id']}"
-        elif element.has_attr("name"):
-            selector = f"[name='{element['name']}']"
-        elif element.has_attr("data-testid"):
-            selector = f"[data-testid='{element['data-testid']}']"
-        elif element.name == "button" and display_text:
-            clean_text = display_text.replace("'", "")
-            selector = f"//button[contains(normalize-space(), '{clean_text}') ]"
-
-        el_data["suggested_selector"] = selector
         interactive_elements.append(el_data)
 
     # Sort by SOP relevance first, then score, and truncate to top-N to avoid context pollution
     interactive_elements.sort(
         key=lambda e: (
-            any("SOP match" in r for r in e.get("match_reasons", [])),
+            any(isinstance(r, str) and r.startswith("SOP ") for r in e.get("match_reasons", [])),
             e.get("score", 0),
         ),
         reverse=True,
@@ -339,7 +398,10 @@ def main() -> None:
 
         # Optional: SOP content can be provided via environment for smarter filtering
         sop_text = os.environ.get("PREFLIGHT_SOP_TEXT", "")
-        sop_keywords_main: set[str] = extract_sop_keywords(sop_text) if sop_text else set()
+        sop_targets_main = extract_sop_targets(sop_text) if sop_text else {"keywords": set(), "phrases": []}
+        # For smart waits, treat both keywords and phrases as signals
+        sop_keywords_main: set[str] = set(sop_targets_main["keywords"])
+        sop_keywords_main.update(p.lower() for p in sop_targets_main["phrases"] if p)
 
         options = Options()
         options.add_argument("--headless=new")
