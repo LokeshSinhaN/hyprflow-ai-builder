@@ -8,7 +8,6 @@ import { CodeViewer } from "./CodeViewer";
 import { supabase } from "@/integrations/supabase/client";
 import { ChatHistory } from "./ChatHistory";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -598,22 +597,46 @@ export const ChatInterface = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-12rem)] flex gap-4 overflow-hidden">
-      {/* Chat History Sidebar */}
-      {showHistory && (
-        <div className="w-64 flex-shrink-0">
+    <div className="flex-1 min-h-0 flex gap-4 overflow-hidden relative">
+      {/* Chat History Drawer (overlays, does not take layout space) */}
+      <div
+        className={cn(
+          "absolute inset-0 z-30 transition-opacity",
+          showHistory ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
+        )}
+        onClick={() => setShowHistory(false)}
+      >
+        {/* Backdrop */}
+        <div className="absolute inset-0 bg-background/40 backdrop-blur-[2px]" />
+
+        {/* Drawer */}
+        <div
+          className={cn(
+            "absolute left-0 top-0 h-full w-80 max-w-[85vw]",
+            "bg-card/40 backdrop-blur-xl border-r border-border/50 shadow-2xl",
+            "transition-transform duration-300 ease-out",
+            showHistory ? "translate-x-0" : "-translate-x-full",
+          )}
+          onClick={(e) => e.stopPropagation()}
+        >
           <ChatHistory
             currentConversationId={currentConversationId}
-            onSelectConversation={loadConversation}
-            onNewConversation={createNewConversation}
+            onSelectConversation={(id) => {
+              loadConversation(id);
+              setShowHistory(false);
+            }}
+            onNewConversation={() => {
+              createNewConversation();
+              setShowHistory(false);
+            }}
           />
         </div>
-      )}
+      </div>
 
       {/* Left Panel - Chat (~45% width) */}
-      <div className="basis-[45%] min-w-0 min-h-0 flex flex-col gap-4">
+      <div className="basis-[45%] min-w-0 min-h-0 flex flex-col gap-4 overflow-hidden">
         {/* Messages Area (includes config card so bottom chat controls stay fixed) */}
-        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto space-y-4 pr-2">
+        <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-2">
           {messages.map((msg, idx) => (
             <Card
               key={idx}
@@ -677,117 +700,87 @@ export const ChatInterface = () => {
           )}
         </div>
 
-        {/* Uploaded SOPs List */}
-        {sopDocuments.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>Uploaded SOPs (this session):</span>
-            {sopDocuments.map((doc) => (
-              <Badge
-                key={doc.id}
-                variant="secondary"
-                className="flex items-center gap-2 max-w-xs"
-              >
-                <span className="truncate">{doc.title}</span>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteSOP(doc.id)}
-                  className="text-[10px] uppercase tracking-wide hover:text-destructive"
+        {/* Prompt Composer */}
+        <div className="rounded-2xl border border-border/50 bg-card/30 backdrop-blur-sm p-3 shadow-sm">
+          {/* Attached SOPs (show inside prompt box) */}
+          {sopDocuments.length > 0 && (
+            <div className="mb-3 flex flex-wrap gap-2">
+              {sopDocuments.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-start gap-3 rounded-xl border border-border/50 bg-card/60 px-3 py-2 text-xs max-w-full"
                 >
-                  Remove
-                </button>
-              </Badge>
-            ))}
-          </div>
-        )}
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{doc.title}</p>
+                    <p className="text-[10px] text-muted-foreground -mt-0.5">PDF</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteSOP(doc.id)}
+                    className="text-[10px] uppercase tracking-wide text-muted-foreground hover:text-destructive"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
-        {/* Pre-Flight configuration (only after SOP upload & when toggle is ON) */}
-        {sopDocuments.length > 0 && showPreflightSetup && usePreflight && (
-          <div className="mt-2 space-y-2 text-xs border border-border/50 rounded-md p-3 bg-card/40">
-            <p className="font-medium">Optional Pre-Flight Setup</p>
-            <div className="space-y-1">
-              <Label htmlFor="target-url" className="font-medium">
-                Target URLs (one per line)
-              </Label>
-              <div className="relative">
-                <Textarea
-                  id="target-url"
-                  value={targetUrl}
-                  onChange={(e) => setTargetUrl(e.target.value)}
-                  placeholder={"https://example.com/main\nhttps://example.com/register"}
-                  className="w-full h-16 text-xs resize-none bg-card/50 border-border/50 pr-12 pb-6"
-                />
-                <div className="absolute bottom-2 right-2 flex gap-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-6 w-6 p-0 rounded-full text-[10px] bg-background/80 border-border/60 hover:bg-background"
-                    onClick={() => {
-                      // Cancel pre-flight for now and hide setup
-                      setUsePreflight(false);
-                      setShowPreflightSetup(false);
-                    }}
-                  >
-                    X
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="premium"
-                    size="icon"
-                    className="h-6 w-6 p-0 rounded-full text-[11px]"
-                    onClick={() => {
-                      // Confirm configuration and return to normal chat UI
-                      setShowPreflightSetup(false);
-                    }}
-                  >
-                    ✓
-                  </Button>
+          {/* Pre-Flight configuration (only after SOP upload & when toggle is ON) */}
+          {sopDocuments.length > 0 && showPreflightSetup && usePreflight && (
+            <div className="mb-3 space-y-2 text-xs border border-border/50 rounded-xl p-3 bg-card/40">
+              <p className="font-medium">Optional Pre-Flight Setup</p>
+              <div className="space-y-1">
+                <Label htmlFor="target-url" className="font-medium">
+                  Target URLs (one per line)
+                </Label>
+                <div className="relative">
+                  <Textarea
+                    id="target-url"
+                    value={targetUrl}
+                    onChange={(e) => setTargetUrl(e.target.value)}
+                    placeholder={"https://example.com/main\nhttps://example.com/register"}
+                    className="w-full h-16 text-xs resize-none bg-card/50 border-border/50 pr-12 pb-6 rounded-lg"
+                  />
+                  <div className="absolute bottom-2 right-2 flex gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-6 w-6 p-0 rounded-full text-[10px] bg-background/80 border-border/60 hover:bg-background"
+                      onClick={() => {
+                        // Cancel pre-flight for now and hide setup
+                        setUsePreflight(false);
+                        setShowPreflightSetup(false);
+                      }}
+                    >
+                      X
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="premium"
+                      size="icon"
+                      className="h-6 w-6 p-0 rounded-full text-[11px]"
+                      onClick={() => {
+                        // Confirm configuration and return to normal chat UI
+                        setShowPreflightSetup(false);
+                      }}
+                    >
+                      ✓
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Action Buttons */}
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowHistory(!showHistory)}
-          >
-            <History className="w-4 h-4" />
-            {showHistory ? "Hide" : "Show"} History
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleUpload}
-            disabled={isProcessing}
-          >
-            <Upload className="w-4 h-4" />
-            {uploadedDocument ? "SOP Uploaded ✓" : "Upload SOP"}
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            onChange={handleFileChange}
-            className="hidden"
-          />
-          <Button variant="outline" size="sm" onClick={handleScreenCapture}>
-            <Camera className="w-4 h-4" />
-            Screen Capture
-          </Button>
-        </div>
-
-        {/* Input Area */}
-        <div className="flex gap-2 mt-2 items-end">
-          <div className="flex-1 relative">
+          {/* Message input (send button inside the prompt box) */}
+          <div className="relative">
             <Textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder={uploadedDocument ? "Ask me to generate automation scripts based on your uploaded SOP..." : "Describe the automation workflow you need..."}
-              className="min-h-[100px] resize-none bg-card/50 backdrop-blur-sm border-border/50 focus:border-accent/50 pr-32 pb-8"
+              className="min-h-[110px] resize-none rounded-xl bg-card/40 backdrop-blur-sm border-border/50 focus-visible:ring-1 focus-visible:ring-accent/40 pr-14 pb-12"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -795,18 +788,27 @@ export const ChatInterface = () => {
                 }
               }}
             />
-            {/* Target URLs toggle lives inside the prompt box, anchored to the bottom-left */}
-            <div className="pointer-events-none absolute left-3 bottom-2 flex items-center gap-1 text-[10px] text-muted-foreground">
+
+            <Button
+              variant="premium"
+              size="icon"
+              onClick={handleSend}
+              className="absolute right-2 bottom-2 h-10 w-10 rounded-full"
+            >
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+
+          {/* Controls row (Target URLs toggle + action buttons) */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+            <div className="flex items-center gap-2">
               <Switch
                 id="toggle-preflight"
                 checked={usePreflight}
                 onCheckedChange={handleTogglePreflight}
-                className="pointer-events-auto h-3 w-6 data-[state=checked]:bg-accent data-[state=checked]:border-accent transition-transform hover:scale-105"
+                className="h-3 w-6 data-[state=checked]:bg-accent data-[state=checked]:border-accent transition-transform hover:scale-105"
               />
-              <Label
-                htmlFor="toggle-preflight"
-                className="pointer-events-auto text-[10px] leading-none cursor-pointer select-none"
-              >
+              <Label htmlFor="toggle-preflight" className="text-[10px] leading-none cursor-pointer select-none">
                 {sopDocuments.length > 0
                   ? autoTargetUrls.length > 0
                     ? `Target URLs (${autoTargetUrls.length} found)`
@@ -814,15 +816,51 @@ export const ChatInterface = () => {
                   : "Target URLs (enable pre-flight DOM capture)"}
               </Label>
             </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[10px]"
+              onClick={() => setShowHistory(!showHistory)}
+            >
+              <History className="w-3.5 h-3.5" />
+              {showHistory ? "Hide" : "Show"} History
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[10px]"
+              onClick={handleUpload}
+              disabled={isProcessing}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              {uploadedDocument ? "SOP Uploaded ✓" : "Upload SOP"}
+            </Button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-[10px]"
+              onClick={handleScreenCapture}
+            >
+              <Camera className="w-3.5 h-3.5" />
+              Screen Capture
+            </Button>
           </div>
-          <Button variant="premium" size="icon" onClick={handleSend} className="h-[100px] w-12">
-            <Send className="w-5 h-5" />
-          </Button>
         </div>
       </div>
 
       {/* Right Panel - Code Viewer (~55% width) */}
-      <div className="basis-[55%] min-w-0 min-h-0 flex flex-col relative">
+      <div className="basis-[55%] min-w-0 min-h-0 flex flex-col relative overflow-hidden">
         {isProcessing && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">

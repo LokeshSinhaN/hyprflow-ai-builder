@@ -51,7 +51,7 @@ export const CodeViewer = ({ pythonCode, playwrightCode, onRun }: CodeViewerProp
   };
 
   return (
-    <div className="h-full flex flex-col gap-4">
+    <div className="flex-1 min-h-0 flex flex-col gap-4">
       {/* Header: title, language tabs, and actions all in a single row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -104,8 +104,8 @@ export const CodeViewer = ({ pythonCode, playwrightCode, onRun }: CodeViewerProp
         </div>
       </div>
 
-      <Card className="flex-1 overflow-hidden bg-[#1e1e1e] backdrop-blur-sm border-border/50">
-        <div className="h-full overflow-auto">
+      <Card className="flex-1 min-h-0 overflow-hidden flex flex-col bg-[#1e1e1e] backdrop-blur-sm border-border/50">
+        <div className="flex-1 min-h-0 overflow-auto">
           <Highlight theme={themes.vsDark} code={currentCode} language={currentLanguage as any}>
             {({ style, tokens, getLineProps, getTokenProps }) => (
               <pre style={{ ...style, margin: 0, padding: "1.5rem", background: "transparent" }}>

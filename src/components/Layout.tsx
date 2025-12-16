@@ -21,7 +21,7 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--background-gradient)' }}>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--background-gradient)' }}>
       {/* Header */}
       <header className="border-b border-border/50 backdrop-blur-lg bg-card/30 sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -68,19 +68,10 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 container mx-auto px-4 py-6">
+      {/* Main Content - scroll within the app shell (header stays fixed) */}
+      <main className="flex-1 container mx-auto px-6 py-8 flex flex-col min-h-0 overflow-y-auto overscroll-contain">
         {children}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border/50 backdrop-blur-lg bg-card/30 py-4">
-        <div className="container mx-auto px-4 text-center">
-          <p className="text-sm text-muted-foreground">
-            powered by <span className="text-accent">hyprtask</span>
-          </p>
-        </div>
-      </footer>
     </div>
   );
 };

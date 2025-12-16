@@ -88,5 +88,29 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    /* Slightly smaller base font for denser, more information-dense UI */
+    font-size: 0.875rem; /* ~14px on most browsers */
+  }
+}
+
+/* Global scrollbar styling for a more professional look */
+@layer utilities {
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted));
+    border-radius: 9999px;
+    border: 1px solid hsl(var(--border));
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--accent));
   }
 }
