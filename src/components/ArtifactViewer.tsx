@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Copy, Play } from "lucide-react";
+import { Copy, Play, X } from "lucide-react";
 import { toast } from "sonner";
 import { Highlight, themes } from "prism-react-renderer";
 
@@ -15,6 +15,7 @@ type ArtifactViewerProps = {
   title?: string;
   versionLabel?: string;
   onRun?: () => void;
+  onClose?: () => void;
 };
 
 export const ArtifactViewer = ({
@@ -22,6 +23,7 @@ export const ArtifactViewer = ({
   title = "Artifact",
   versionLabel,
   onRun,
+  onClose,
 }: ArtifactViewerProps) => {
   const handleCopy = () => {
     navigator.clipboard.writeText(artifact.content);
@@ -48,6 +50,12 @@ export const ArtifactViewer = ({
         </div>
 
         <div className="flex gap-2 items-center">
+          {onClose && (
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              <X className="w-4 h-4" />
+              Close (X)
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={handleCopy}>
             <Copy className="w-4 h-4" />
             Copy

@@ -3,7 +3,7 @@ import { ChatInterface } from "@/components/ChatInterface";
 
 const Index = () => {
   return (
-    <Layout>
+    <Layout fullWidth>
       {/* Full-height conversational workspace: chat + code only */}
       <ChatInterface />
     </Layout>

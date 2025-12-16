@@ -6,7 +6,14 @@ import { Button } from "@/components/ui/button";
 import logo from "@/assets/logo.png";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
-export const Layout = ({ children }: { children: React.ReactNode }) => {
+type LayoutProps = {
+  children: React.ReactNode;
+  /** Use for the chat page where the workspace needs to span the full viewport width. */
+  fullWidth?: boolean;
+  mainClassName?: string;
+};
+
+export const Layout = ({ children, fullWidth = false, mainClassName }: LayoutProps) => {
   const location = useLocation();
   const { signOut, user, isAdmin } = useAuth();
 
@@ -19,6 +26,10 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
       { to: "/activity-logs", icon: Activity, label: "Activity Logs" }
     ] : []),
   ];
+
+  const mainBaseClassName = fullWidth
+    ? "flex-1 w-full px-4 md:px-6 py-6 flex flex-col min-h-0 overflow-hidden"
+    : "flex-1 container mx-auto px-6 py-8 flex flex-col min-h-0 overflow-y-auto overscroll-contain";
 
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'var(--background-gradient)' }}>
@@ -68,8 +79,8 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
         </div>
       </header>
 
-      {/* Main Content - scroll within the app shell (header stays fixed) */}
-      <main className="flex-1 container mx-auto px-6 py-8 flex flex-col min-h-0 overflow-y-auto overscroll-contain">
+      {/* Main Content */}
+      <main className={cn(mainBaseClassName, mainClassName)}>
         {children}
       </main>
     </div>
