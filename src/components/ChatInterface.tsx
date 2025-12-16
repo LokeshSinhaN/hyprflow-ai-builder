@@ -785,10 +785,10 @@ export const ChatInterface = () => {
               <Card
                 key={msg.id}
                 className={cn(
-                  "p-4 backdrop-blur-sm transition-all",
+                  "p-4 transition-all",
                   msg.role === "user"
-                    ? "bg-card/80 ml-auto max-w-[85%] border-accent/30"
-                    : "bg-card/50 mr-auto max-w-[85%]",
+                    ? "ml-auto max-w-[85%] border-0 bg-white/5 text-white rounded-2xl rounded-br-sm"
+                    : "mr-auto max-w-[85%] border-0 bg-transparent text-white/90",
                 )}
               >
                 <div className="flex items-start gap-3">
@@ -800,10 +800,14 @@ export const ChatInterface = () => {
 
                   <div className="min-w-0 flex-1">
                     {msg.kind === "text" ? (
-                      <p className="text-sm leading-relaxed">{msg.content}</p>
+                      <p className={cn("text-sm", msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed")}>
+                        {msg.content}
+                      </p>
                     ) : (
                       <div>
-                        <p className="text-sm leading-relaxed">{msg.intro}</p>
+                        <p className={cn("text-sm", msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed")}>
+                          {msg.intro}
+                        </p>
                         {msg.artifacts.map((a) => (
                           <ArtifactCard
                             key={a.version_id}
@@ -867,7 +871,7 @@ export const ChatInterface = () => {
         {/* Prompt Composer */}
         <div className={cn(isLandingState ? "flex-1 flex items-center" : "")}
         >
-          <div className="w-full rounded-2xl border border-border/50 bg-card/30 backdrop-blur-sm p-3 shadow-sm transition-all duration-300 ease-in-out">
+          <div className="w-full rounded-2xl border border-white/10 bg-[#0f172a]/80 backdrop-blur-[12px] p-3 shadow-sm transition-all duration-300 ease-in-out">
             {/* Attached SOPs (show inside prompt box) */}
             {sopDocuments.length > 0 && (
               <div className="mb-3 flex flex-wrap gap-2">
@@ -1034,6 +1038,7 @@ export const ChatInterface = () => {
       <div
         className={cn(
           "min-w-0 min-h-0 flex flex-col relative overflow-hidden transition-all duration-300 ease-in-out",
+          "bg-black/5 rounded-2xl",
           isCanvasOpen
             ? "basis-[55%] opacity-100 translate-x-0"
             : "basis-0 w-0 opacity-0 translate-x-6 pointer-events-none",
