@@ -4,15 +4,28 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Upload, Camera, Send, Sparkles, History } from "lucide-react";
 import { toast } from "sonner";
-import { CodeViewer } from "./CodeViewer";
 import { supabase } from "@/integrations/supabase/client";
 import { ChatHistory } from "./ChatHistory";
+import { ArtifactCard, type ArtifactRef } from "./ArtifactCard";
+import { ArtifactViewer, type Artifact } from "./ArtifactViewer";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 
 const MAX_MESSAGE_LENGTH = 10000;
+
+const newId = (): string => {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // ignore
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
 
 interface SOPDocument {
   id: string;
@@ -160,15 +173,37 @@ const applyConfigEntriesToCode = (code: string, entries: ScriptConfigEntry[]): s
   return updated;
 };
 
+type ChatMessage =
+  | {
+      id: string;
+      role: "user" | "assistant";
+      kind: "text";
+      content: string;
+    }
+  | {
+      id: string;
+      role: "assistant";
+      kind: "artifact";
+      intro: string;
+      artifacts: ArtifactRef[];
+    };
+
 export const ChatInterface = () => {
   const [message, setMessage] = useState("");
   const [generatedScripts, setGeneratedScripts] =
     useState<{ python: string; playwright?: string | null } | null>(null);
   const [baseScripts, setBaseScripts] =
     useState<{ python: string; playwright?: string | null } | null>(null);
+
+  // Claude-style Artifacts state
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [artifactMeta, setArtifactMeta] = useState<Record<string, { title: string; versionLabel: string }>>({});
+  const [activeArtifactVersionId, setActiveArtifactVersionId] = useState<string | null>(null);
+  const [artifactGeneration, setArtifactGeneration] = useState(0);
+
   const [showHistory, setShowHistory] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>("local-conversation");
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [uploadedDocument, setUploadedDocument] = useState<string | null>(null);
   const [sopDocuments, setSopDocuments] = useState<SOPDocument[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -182,6 +217,18 @@ export const ChatInterface = () => {
   const [lastPreflightJobId, setLastPreflightJobId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  const activeArtifact = activeArtifactVersionId
+    ? artifacts.find((a) => a.version_id === activeArtifactVersionId) ?? null
+    : null;
+
+  const activeArtifactTitle = activeArtifactVersionId
+    ? artifactMeta[activeArtifactVersionId]?.title
+    : undefined;
+
+  const activeArtifactVersionLabel = activeArtifactVersionId
+    ? artifactMeta[activeArtifactVersionId]?.versionLabel
+    : undefined;
 
   const handleTogglePreflight = (checked: boolean) => {
     setUsePreflight(checked);
@@ -266,6 +313,13 @@ export const ChatInterface = () => {
     setMessages([]);
     setGeneratedScripts(null);
     setBaseScripts(null);
+
+    // Reset artifacts canvas
+    setArtifacts([]);
+    setArtifactMeta({});
+    setActiveArtifactVersionId(null);
+    setArtifactGeneration(0);
+
     setShowConfigForm(false);
     setConfigEntries([]);
     setTargetUrl("");
@@ -306,7 +360,10 @@ export const ChatInterface = () => {
     }
 
     const userMessage = message;
-    const newMessages = [...messages, { role: "user" as const, content: userMessage }];
+    const newMessages: ChatMessage[] = [
+      ...messages,
+      { id: newId(), role: "user", kind: "text", content: userMessage },
+    ];
     setMessages(newMessages);
     setMessage("");
 
@@ -406,16 +463,62 @@ export const ChatInterface = () => {
       setShowConfigForm(false);
       setConfigEntries([]);
 
-      const assistantMessage = {
-        role: "assistant" as const,
-        content:
-          "I've generated a Python script for your automation workflow. Check the code panel on the right to view, copy, or download it!",
+      // Create Claude-style artifacts (do not render code inline; attach cards and auto-open)
+      const generationNumber = artifactGeneration + 1;
+      setArtifactGeneration(generationNumber);
+      const versionLabel = `v${generationNumber}`;
+
+      const seleniumArtifact: Artifact = {
+        content: pythonScript,
+        language: "python",
+        version_id: newId(),
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
+      const maybePlaywrightArtifact: Artifact | null = playwrightScript
+        ? {
+            content: playwrightScript,
+            language: "python",
+            version_id: newId(),
+          }
+        : null;
+
+      const refs: ArtifactRef[] = [
+        { title: "Python (Selenium)", version_id: seleniumArtifact.version_id, version_label: versionLabel },
+      ];
+
+      if (maybePlaywrightArtifact) {
+        refs.push({
+          title: "Python (Playwright)",
+          version_id: maybePlaywrightArtifact.version_id,
+          version_label: versionLabel,
+        });
+      }
+
+      setArtifacts((prev) => [...prev, seleniumArtifact, ...(maybePlaywrightArtifact ? [maybePlaywrightArtifact] : [])]);
+      setArtifactMeta((prev) => {
+        const next = { ...prev };
+        next[seleniumArtifact.version_id] = { title: "Python (Selenium)", versionLabel };
+        if (maybePlaywrightArtifact) {
+          next[maybePlaywrightArtifact.version_id] = { title: "Python (Playwright)", versionLabel };
+        }
+        return next;
+      });
+
+      // Auto-open newest artifact
+      setActiveArtifactVersionId(seleniumArtifact.version_id);
+
+      const assistantArtifactMessage: ChatMessage = {
+        id: newId(),
+        role: "assistant",
+        kind: "artifact",
+        intro: "Generated code artifacts:",
+        artifacts: refs,
+      };
+
+      setMessages((prev) => [...prev, assistantArtifactMessage]);
 
       // Save assistant message with primary Python code (no-op in dev mode)
-      await saveMessage("assistant", assistantMessage.content, pythonScript);
+      await saveMessage("assistant", assistantArtifactMessage.intro, pythonScript);
 
       // Clear uploaded document after successful generation
       if (uploadedDocument) {
@@ -431,7 +534,9 @@ export const ChatInterface = () => {
       setMessages((prev) => [
         ...prev,
         {
-          role: "assistant" as const,
+          id: newId(),
+          role: "assistant",
+          kind: "text",
           content:
             "I ran into an error while preparing your scripts: " +
             (error instanceof Error ? error.message : "Unknown error."),
@@ -538,7 +643,21 @@ export const ChatInterface = () => {
 };
 
   const handleOpenConfig = () => {
-    const base = baseScripts ?? generatedScripts;
+    const active = activeArtifact;
+
+    if (activeArtifactVersionId) {
+      const title = artifactMeta[activeArtifactVersionId]?.title ?? "";
+      if (title.includes("Playwright")) {
+        toast.error(
+          "Configuration is only supported for the Selenium Python script. Open the Python (Selenium) artifact to continue.",
+        );
+        return;
+      }
+    }
+
+    const base = active
+      ? { python: active.content, playwright: null as string | null }
+      : baseScripts ?? generatedScripts;
 
     if (!base || !base.python) {
       toast.error("Generate a script first, then click Run to configure it.");
@@ -565,29 +684,37 @@ export const ChatInterface = () => {
   };
 
   const handleApplyConfig = () => {
-    const base = baseScripts ?? generatedScripts;
-
-    if (!base || !base.python) {
-      toast.error("No script available to configure.");
+    if (!activeArtifactVersionId || !activeArtifact) {
+      toast.error("Open an artifact first, then click Run to configure it.");
       return;
     }
 
-    const updatedPython = applyConfigEntriesToCode(base.python, configEntries);
-    const updatedPlaywright = base.playwright
-      ? applyConfigEntriesToCode(base.playwright, configEntries)
-      : base.playwright;
+    const updatedContent = applyConfigEntriesToCode(activeArtifact.content, configEntries);
 
-    setGeneratedScripts({ python: updatedPython, playwright: updatedPlaywright ?? null });
+    // Update the currently open artifact content in-place (preserves current behavior)
+    setArtifacts((prev) =>
+      prev.map((a) => (a.version_id === activeArtifactVersionId ? { ...a, content: updatedContent } : a)),
+    );
+
+    // Keep existing generatedScripts state in sync for other flows
+    const title = artifactMeta[activeArtifactVersionId]?.title ?? "";
+    if (title.includes("Playwright")) {
+      setGeneratedScripts((prev) => (prev ? { ...prev, playwright: updatedContent } : prev));
+    } else {
+      setGeneratedScripts((prev) => (prev ? { ...prev, python: updatedContent } : prev));
+    }
+
     setShowConfigForm(false);
     toast.success("Configuration applied. You can now copy or download the updated script.");
 
-    // Add a short assistant message in the chat history to confirm the update
     setMessages((prev) => [
       ...prev,
       {
-        role: "assistant" as const,
+        id: newId(),
+        role: "assistant",
+        kind: "text",
         content:
-          "Your configuration values have been applied to the generated script. You can now copy or download the updated code.",
+          "Your configuration values have been applied to the active artifact. You can now copy or download the updated code.",
       },
     ]);
   };
@@ -637,9 +764,9 @@ export const ChatInterface = () => {
       <div className="basis-[45%] min-w-0 min-h-0 flex flex-col gap-4 overflow-hidden">
         {/* Messages Area (includes config card so bottom chat controls stay fixed) */}
         <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-2">
-          {messages.map((msg, idx) => (
+          {messages.map((msg) => (
             <Card
-              key={idx}
+              key={msg.id}
               className={cn(
                 "p-4 backdrop-blur-sm transition-all",
                 msg.role === "user"
@@ -653,7 +780,23 @@ export const ChatInterface = () => {
                     <Sparkles className="w-4 h-4 text-accent-foreground" />
                   </div>
                 )}
-                <p className="text-sm leading-relaxed">{msg.content}</p>
+
+                <div className="min-w-0 flex-1">
+                  {msg.kind === "text" ? (
+                    <p className="text-sm leading-relaxed">{msg.content}</p>
+                  ) : (
+                    <div>
+                      <p className="text-sm leading-relaxed">{msg.intro}</p>
+                      {msg.artifacts.map((a) => (
+                        <ArtifactCard
+                          key={a.version_id}
+                          artifact={a}
+                          onOpen={(versionId) => setActiveArtifactVersionId(versionId)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </Card>
           ))}
@@ -859,7 +1002,7 @@ export const ChatInterface = () => {
         </div>
       </div>
 
-      {/* Right Panel - Code Viewer (~55% width) */}
+      {/* Right Panel - Artifacts Canvas (~55% width) */}
       <div className="basis-[55%] min-w-0 min-h-0 flex flex-col relative overflow-hidden">
         {isProcessing && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
@@ -873,10 +1016,12 @@ export const ChatInterface = () => {
             </div>
           </div>
         )}
-        {generatedScripts ? (
-          <CodeViewer
-            pythonCode={generatedScripts.python}
-            playwrightCode={generatedScripts.playwright ?? undefined}
+
+        {activeArtifact ? (
+          <ArtifactViewer
+            artifact={activeArtifact}
+            title={activeArtifactTitle ?? "Generated Script"}
+            versionLabel={activeArtifactVersionLabel}
             onRun={handleOpenConfig}
           />
         ) : (
