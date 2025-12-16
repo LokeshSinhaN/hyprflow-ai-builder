@@ -50,12 +50,6 @@ export const ArtifactViewer = ({
         </div>
 
         <div className="flex gap-2 items-center">
-          {onClose && (
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              <X className="w-4 h-4" />
-              Close (X)
-            </Button>
-          )}
           <Button variant="ghost" size="sm" onClick={handleCopy}>
             <Copy className="w-4 h-4" />
             Copy
@@ -64,6 +58,12 @@ export const ArtifactViewer = ({
             <Play className="w-4 h-4" />
             Run
           </Button>
+          {onClose && (
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              <X className="w-4 h-4" />
+              Close
+            </Button>
+          )}
         </div>
       </div>
 

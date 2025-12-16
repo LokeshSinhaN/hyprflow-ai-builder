@@ -9,6 +9,7 @@ import { ChatHistory } from "./ChatHistory";
 import { ArtifactCard, type ArtifactRef } from "./ArtifactCard";
 import { ArtifactViewer, type Artifact } from "./ArtifactViewer";
 import { cn } from "@/lib/utils";
+import { useCanvas } from "@/hooks/useCanvas";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -189,6 +190,8 @@ type ChatMessage =
     };
 
 export const ChatInterface = () => {
+  const { isCanvasOpen, openCanvas, closeCanvas } = useCanvas();
+
   const [message, setMessage] = useState("");
   const [generatedScripts, setGeneratedScripts] =
     useState<{ python: string; playwright?: string | null } | null>(null);
@@ -506,6 +509,7 @@ export const ChatInterface = () => {
 
       // Auto-open newest artifact
       setActiveArtifactVersionId(seleniumArtifact.version_id);
+      openCanvas();
 
       const assistantArtifactMessage: ChatMessage = {
         id: newId(),
@@ -723,8 +727,15 @@ export const ChatInterface = () => {
     toast.info("Coming Soon");
   };
 
+  const isLandingState = !isCanvasOpen && messages.length === 0;
+
   return (
-    <div className="flex-1 min-h-0 flex gap-4 overflow-hidden relative">
+    <div
+      className={cn(
+        "flex-1 min-h-0 overflow-hidden relative transition-all duration-300 ease-in-out",
+        isCanvasOpen ? "flex gap-4" : "flex justify-center",
+      )}
+    >
       {/* Chat History Drawer (overlays, does not take layout space) */}
       <div
         className={cn(
@@ -760,250 +771,274 @@ export const ChatInterface = () => {
         </div>
       </div>
 
-      {/* Left Panel - Chat (~45% width) */}
-      <div className="basis-[45%] min-w-0 min-h-0 flex flex-col gap-4 overflow-hidden">
+      {/* Chat Column */}
+      <div
+        className={cn(
+          "min-w-0 min-h-0 flex flex-col overflow-hidden transition-all duration-300 ease-in-out",
+          isCanvasOpen ? "basis-[45%] gap-4" : "w-full max-w-[800px] gap-6",
+        )}
+      >
         {/* Messages Area (includes config card so bottom chat controls stay fixed) */}
-        <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-2">
-          {messages.map((msg) => (
-            <Card
-              key={msg.id}
-              className={cn(
-                "p-4 backdrop-blur-sm transition-all",
-                msg.role === "user"
-                  ? "bg-card/80 ml-auto max-w-[85%] border-accent/30"
-                  : "bg-card/50 mr-auto max-w-[85%]"
-              )}
-            >
-              <div className="flex items-start gap-3">
-                {msg.role === "assistant" && (
-                  <div className="p-1.5 rounded-md bg-gradient-primary shadow-glow">
-                    <Sparkles className="w-4 h-4 text-accent-foreground" />
-                  </div>
+        {!isLandingState && (
+          <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-2">
+            {messages.map((msg) => (
+              <Card
+                key={msg.id}
+                className={cn(
+                  "p-4 backdrop-blur-sm transition-all",
+                  msg.role === "user"
+                    ? "bg-card/80 ml-auto max-w-[85%] border-accent/30"
+                    : "bg-card/50 mr-auto max-w-[85%]",
                 )}
-
-                <div className="min-w-0 flex-1">
-                  {msg.kind === "text" ? (
-                    <p className="text-sm leading-relaxed">{msg.content}</p>
-                  ) : (
-                    <div>
-                      <p className="text-sm leading-relaxed">{msg.intro}</p>
-                      {msg.artifacts.map((a) => (
-                        <ArtifactCard
-                          key={a.version_id}
-                          artifact={a}
-                          onOpen={(versionId) => setActiveArtifactVersionId(versionId)}
-                        />
-                      ))}
+              >
+                <div className="flex items-start gap-3">
+                  {msg.role === "assistant" && (
+                    <div className="p-1.5 rounded-md bg-gradient-primary shadow-glow">
+                      <Sparkles className="w-4 h-4 text-accent-foreground" />
                     </div>
                   )}
+
+                  <div className="min-w-0 flex-1">
+                    {msg.kind === "text" ? (
+                      <p className="text-sm leading-relaxed">{msg.content}</p>
+                    ) : (
+                      <div>
+                        <p className="text-sm leading-relaxed">{msg.intro}</p>
+                        {msg.artifacts.map((a) => (
+                          <ArtifactCard
+                            key={a.version_id}
+                            artifact={a}
+                            onOpen={(versionId) => {
+                              setActiveArtifactVersionId(versionId);
+                              openCanvas();
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </Card>
-          ))}
+              </Card>
+            ))}
 
-          {showConfigForm && configEntries.length > 0 && (
-            <Card className="p-6 space-y-6 bg-card/60 border-border/60 shadow-sm">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-wide text-foreground">
-                  Required Configs
-                </p>
-              </div>
+            {showConfigForm && configEntries.length > 0 && (
+              <Card className="p-6 space-y-6 bg-card/60 border-border/60 shadow-sm">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-wide text-foreground">
+                    Required Configs
+                  </p>
+                </div>
 
-              <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
-                {configEntries.map((entry, index) => (
-                  <div key={entry.key} className="space-y-1">
-                    <Label htmlFor={`config-${entry.key}`} className="text-xs font-semibold tracking-wide">
-                      {entry.key}
-                    </Label>
-                    <Input
-                      id={`config-${entry.key}`}
-                      type={entry.inputType}
-                      value={entry.value}
-                      placeholder={entry.originalValue || entry.key}
-                      onChange={(e) => {
-                        const next = [...configEntries];
-                        next[index] = { ...next[index], value: e.target.value };
-                        setConfigEntries(next);
-                      }}
-                      className="text-xs h-9"
-                    />
+                <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
+                  {configEntries.map((entry, index) => (
+                    <div key={entry.key} className="space-y-1">
+                      <Label htmlFor={`config-${entry.key}`} className="text-xs font-semibold tracking-wide">
+                        {entry.key}
+                      </Label>
+                      <Input
+                        id={`config-${entry.key}`}
+                        type={entry.inputType}
+                        value={entry.value}
+                        placeholder={entry.originalValue || entry.key}
+                        onChange={(e) => {
+                          const next = [...configEntries];
+                          next[index] = { ...next[index], value: e.target.value };
+                          setConfigEntries(next);
+                        }}
+                        className="text-xs h-9"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" size="sm" onClick={() => setShowConfigForm(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="premium" size="sm" onClick={handleApplyConfig}>
+                    Submit
+                  </Button>
+                </div>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {/* Prompt Composer */}
+        <div className={cn(isLandingState ? "flex-1 flex items-center" : "")}
+        >
+          <div className="w-full rounded-2xl border border-border/50 bg-card/30 backdrop-blur-sm p-3 shadow-sm transition-all duration-300 ease-in-out">
+            {/* Attached SOPs (show inside prompt box) */}
+            {sopDocuments.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {sopDocuments.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-start gap-3 rounded-xl border border-border/50 bg-card/60 px-3 py-2 text-xs max-w-full"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{doc.title}</p>
+                      <p className="text-[10px] text-muted-foreground -mt-0.5">PDF</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSOP(doc.id)}
+                      className="text-[10px] uppercase tracking-wide text-muted-foreground hover:text-destructive"
+                    >
+                      Remove
+                    </button>
                   </div>
                 ))}
               </div>
+            )}
 
-              <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" size="sm" onClick={() => setShowConfigForm(false)}>
-                  Cancel
-                </Button>
-                <Button variant="premium" size="sm" onClick={handleApplyConfig}>
-                  Submit
-                </Button>
-              </div>
-            </Card>
-          )}
-        </div>
-
-        {/* Prompt Composer */}
-        <div className="rounded-2xl border border-border/50 bg-card/30 backdrop-blur-sm p-3 shadow-sm">
-          {/* Attached SOPs (show inside prompt box) */}
-          {sopDocuments.length > 0 && (
-            <div className="mb-3 flex flex-wrap gap-2">
-              {sopDocuments.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="flex items-start gap-3 rounded-xl border border-border/50 bg-card/60 px-3 py-2 text-xs max-w-full"
-                >
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">{doc.title}</p>
-                    <p className="text-[10px] text-muted-foreground -mt-0.5">PDF</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteSOP(doc.id)}
-                    className="text-[10px] uppercase tracking-wide text-muted-foreground hover:text-destructive"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Pre-Flight configuration (only after SOP upload & when toggle is ON) */}
-          {sopDocuments.length > 0 && showPreflightSetup && usePreflight && (
-            <div className="mb-3 space-y-2 text-xs border border-border/50 rounded-xl p-3 bg-card/40">
-              <p className="font-medium">Optional Pre-Flight Setup</p>
-              <div className="space-y-1">
-                <Label htmlFor="target-url" className="font-medium">
-                  Target URLs (one per line)
-                </Label>
-                <div className="relative">
-                  <Textarea
-                    id="target-url"
-                    value={targetUrl}
-                    onChange={(e) => setTargetUrl(e.target.value)}
-                    placeholder={"https://example.com/main\nhttps://example.com/register"}
-                    className="w-full h-16 text-xs resize-none bg-card/50 border-border/50 pr-12 pb-6 rounded-lg"
-                  />
-                  <div className="absolute bottom-2 right-2 flex gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="h-6 w-6 p-0 rounded-full text-[10px] bg-background/80 border-border/60 hover:bg-background"
-                      onClick={() => {
-                        // Cancel pre-flight for now and hide setup
-                        setUsePreflight(false);
-                        setShowPreflightSetup(false);
-                      }}
-                    >
-                      X
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="premium"
-                      size="icon"
-                      className="h-6 w-6 p-0 rounded-full text-[11px]"
-                      onClick={() => {
-                        // Confirm configuration and return to normal chat UI
-                        setShowPreflightSetup(false);
-                      }}
-                    >
-                      ✓
-                    </Button>
+            {/* Pre-Flight configuration (only after SOP upload & when toggle is ON) */}
+            {sopDocuments.length > 0 && showPreflightSetup && usePreflight && (
+              <div className="mb-3 space-y-2 text-xs border border-border/50 rounded-xl p-3 bg-card/40">
+                <p className="font-medium">Optional Pre-Flight Setup</p>
+                <div className="space-y-1">
+                  <Label htmlFor="target-url" className="font-medium">
+                    Target URLs (one per line)
+                  </Label>
+                  <div className="relative">
+                    <Textarea
+                      id="target-url"
+                      value={targetUrl}
+                      onChange={(e) => setTargetUrl(e.target.value)}
+                      placeholder={"https://example.com/main\nhttps://example.com/register"}
+                      className="w-full h-16 text-xs resize-none bg-card/50 border-border/50 pr-12 pb-6 rounded-lg"
+                    />
+                    <div className="absolute bottom-2 right-2 flex gap-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className="h-6 w-6 p-0 rounded-full text-[10px] bg-background/80 border-border/60 hover:bg-background"
+                        onClick={() => {
+                          // Cancel pre-flight for now and hide setup
+                          setUsePreflight(false);
+                          setShowPreflightSetup(false);
+                        }}
+                      >
+                        X
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="premium"
+                        size="icon"
+                        className="h-6 w-6 p-0 rounded-full text-[11px]"
+                        onClick={() => {
+                          // Confirm configuration and return to normal chat UI
+                          setShowPreflightSetup(false);
+                        }}
+                      >
+                        ✓
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Message input (send button inside the prompt box) */}
-          <div className="relative">
-            <Textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder={uploadedDocument ? "Ask me to generate automation scripts based on your uploaded SOP..." : "Describe the automation workflow you need..."}
-              className="min-h-[110px] resize-none rounded-xl bg-card/40 backdrop-blur-sm border-border/50 focus-visible:ring-1 focus-visible:ring-accent/40 pr-14 pb-12"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
+            {/* Message input (send button inside the prompt box) */}
+            <div className="relative">
+              <Textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder={
+                  uploadedDocument
+                    ? "Ask me to generate automation scripts based on your uploaded SOP..."
+                    : "Describe the automation workflow you need..."
                 }
-              }}
-            />
-
-            <Button
-              variant="premium"
-              size="icon"
-              onClick={handleSend}
-              className="absolute right-2 bottom-2 h-10 w-10 rounded-full"
-            >
-              <Send className="w-4 h-4" />
-            </Button>
-          </div>
-
-          {/* Controls row (Target URLs toggle + action buttons) */}
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <Switch
-                id="toggle-preflight"
-                checked={usePreflight}
-                onCheckedChange={handleTogglePreflight}
-                className="h-3 w-6 data-[state=checked]:bg-accent data-[state=checked]:border-accent transition-transform hover:scale-105"
+                className="min-h-[110px] resize-none rounded-xl bg-card/40 backdrop-blur-sm border-border/50 focus-visible:ring-1 focus-visible:ring-accent/40 pr-14 pb-12"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
               />
-              <Label htmlFor="toggle-preflight" className="text-[10px] leading-none cursor-pointer select-none">
-                {sopDocuments.length > 0
-                  ? autoTargetUrls.length > 0
-                    ? `Target URLs (${autoTargetUrls.length} found)`
-                    : "Target URLs not found"
-                  : "Target URLs (enable pre-flight DOM capture)"}
-              </Label>
+
+              <Button
+                variant="premium"
+                size="icon"
+                onClick={handleSend}
+                className="absolute right-2 bottom-2 h-10 w-10 rounded-full"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-[10px]"
-              onClick={() => setShowHistory(!showHistory)}
-            >
-              <History className="w-3.5 h-3.5" />
-              {showHistory ? "Hide" : "Show"} History
-            </Button>
+            {/* Controls row (Target URLs toggle + action buttons) */}
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="toggle-preflight"
+                  checked={usePreflight}
+                  onCheckedChange={handleTogglePreflight}
+                  className="h-3 w-6 data-[state=checked]:bg-accent data-[state=checked]:border-accent transition-transform hover:scale-105"
+                />
+                <Label htmlFor="toggle-preflight" className="text-[10px] leading-none cursor-pointer select-none">
+                  {sopDocuments.length > 0
+                    ? autoTargetUrls.length > 0
+                      ? `Target URLs (${autoTargetUrls.length} found)`
+                      : "Target URLs not found"
+                    : "Target URLs (enable pre-flight DOM capture)"}
+                </Label>
+              </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-[10px]"
-              onClick={handleUpload}
-              disabled={isProcessing}
-            >
-              <Upload className="w-3.5 h-3.5" />
-              {uploadedDocument ? "SOP Uploaded ✓" : "Upload SOP"}
-            </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[10px]"
+                onClick={() => setShowHistory(!showHistory)}
+              >
+                <History className="w-3.5 h-3.5" />
+                {showHistory ? "Hide" : "Show"} History
+              </Button>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf"
-              onChange={handleFileChange}
-              className="hidden"
-            />
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[10px]"
+                onClick={handleUpload}
+                disabled={isProcessing}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                {uploadedDocument ? "SOP Uploaded ✓" : "Upload SOP"}
+              </Button>
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-[10px]"
-              onClick={handleScreenCapture}
-            >
-              <Camera className="w-3.5 h-3.5" />
-              Screen Capture
-            </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-[10px]"
+                onClick={handleScreenCapture}
+              >
+                <Camera className="w-3.5 h-3.5" />
+                Screen Capture
+              </Button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Right Panel - Artifacts Canvas (~55% width) */}
-      <div className="basis-[55%] min-w-0 min-h-0 flex flex-col relative overflow-hidden">
+      {/* Right Panel - Artifacts Canvas */}
+      <div
+        className={cn(
+          "min-w-0 min-h-0 flex flex-col relative overflow-hidden transition-all duration-300 ease-in-out",
+          isCanvasOpen
+            ? "basis-[55%] opacity-100 translate-x-0"
+            : "basis-0 w-0 opacity-0 translate-x-6 pointer-events-none",
+        )}
+      >
         {isProcessing && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">
@@ -1023,6 +1058,7 @@ export const ChatInterface = () => {
             title={activeArtifactTitle ?? "Generated Script"}
             versionLabel={activeArtifactVersionLabel}
             onRun={handleOpenConfig}
+            onClose={closeCanvas}
           />
         ) : (
           <Card className="h-full flex items-center justify-center bg-card/30 backdrop-blur-sm border-border/50 border-dashed">
