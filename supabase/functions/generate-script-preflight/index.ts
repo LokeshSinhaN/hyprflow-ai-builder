@@ -31,6 +31,31 @@ const sanitizeDomSnippet = (html: string): string => {
   return cleaned.trim();
 };
 
+type OutputPlan = {
+  intent: "code" | "explain";
+  seleniumOnly: boolean;
+  requirePlaywright: boolean;
+};
+
+const classifyPrompt = (message: string): OutputPlan => {
+  const m = (message || "").toLowerCase();
+
+  const hasSelenium = /\bselenium\b/.test(m);
+  const hasPlaywright = /\bplaywright\b/.test(m);
+
+  const wantsFix = /\b(fix|debug|resolve|repair|correct|update|patch|refactor)\b/.test(m);
+  const wantsExplain =
+    /\b(explain|explanation|how does|how do|walk me through|what does|describe|breakdown|step[- ]by[- ]step)\b/.test(m) ||
+    /\b(tags?)\b/.test(m) ||
+    /\b(selectors?|locators?|xpath|css selector)\b/.test(m);
+
+  const intent: OutputPlan["intent"] = wantsExplain && !wantsFix ? "explain" : "code";
+  const seleniumOnly = hasSelenium && !hasPlaywright;
+  const requirePlaywright = intent === "code" && !seleniumOnly;
+
+  return { intent, seleniumOnly, requirePlaywright };
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -227,6 +252,31 @@ serve(async (req) => {
       ? `\n\n=== COMPLETE WORKFLOW + DOM CONTEXT ===\n${combinedContext}\n=== END CONTEXT ===\n`
       : "";
 
+    const plan = classifyPrompt(message);
+
+    const outputModeNote = `
+
+================================================================================
+OUTPUT MODE OVERRIDE (MUST FOLLOW)
+================================================================================
+Intent: ${plan.intent}
+Selenium only: ${plan.seleniumOnly}
+
+- Always output content between the required delimiters.
+- If Intent is "explain":
+  - Do NOT output runnable code.
+  - Put the response as Python comments in the Selenium section (each line starts with "# ").
+  - Leave the Playwright section EMPTY.
+- If Intent is "code" and Selenium only is true:
+  - Output ONLY the Selenium script.
+  - Leave the Playwright section EMPTY.
+- If Intent is "code" and Selenium only is false:
+  - Output BOTH Selenium and Playwright scripts.
+
+COOKIE INJECTION (MANDATORY WHEN COOKIES ARE PROVIDED):
+- You MUST implement an inject_cookies(...) helper that takes raw JSON cookie data at runtime (no hard-coded cookie values) and injects it into the browser context reliably.
+`;
+
     const cookiesRuntimeNote = hasCookiesProfile
       ? `\nRUNTIME COOKIES PROFILE (MANDATORY USAGE):\n` +
         `- A validated cookies_json profile for this domain is stored in the backend (Supabase).\n` +
@@ -239,7 +289,8 @@ serve(async (req) => {
     // ENHANCED SYSTEM PROMPT (copied from generate-script-rag) WITH DOM NOTE
     const systemPrompt = `You are an expert web automation engineer specializing in production-ready, CAPTCHA-RESISTANT browser automation.
 
-Generate TWO complete Python automation scripts with ROBUST QA RELIABILITY that work across many websites.
+Generate automation output according to the OUTPUT MODE OVERRIDE section below.
+${outputModeNote}
 
 ${contextSection ? "CRITICAL: Use the SOP/DOM content above as the source of truth for workflow steps and selectors. Only use selectors that exist in the provided DOM." : ""}
 ${hasScoredDom ? "CRITICAL: The DOM elements provided were PRE-FILTERED and SCORED against the SOP text and defensive keywords (cookies, login, etc.). ALWAYS prioritize these pre-validated selectors and attributes over guessing new selectors or generic XPaths. When match_reasons mention cookies or login, you MUST use those elements to unblock the workflow before proceeding." : ""}
@@ -571,10 +622,18 @@ Generate both scripts now following ALL requirements above.`;
 
 **User Request:** ${message}
 
-Generate TWO complete, production-ready Python scripts (Selenium and Playwright) with ROBUST, RESILIENT automation behavior.
+${plan.intent === "explain"
+  ? "Provide an explanation / fix guidance (NO runnable code). Format the entire response as Python comments so it renders nicely in a code viewer."
+  : plan.seleniumOnly
+    ? "Generate ONE complete, production-ready Python script using Selenium only (do NOT generate Playwright)."
+    : "Generate TWO complete, production-ready Python scripts (Selenium and Playwright)."}
 
 CRITICAL REQUIREMENTS CHECKLIST:
-✓ Include create_stealth_driver() and create_stealth_browser() functions with ALL anti-detection options listed above
+${plan.intent === "explain"
+  ? "✓ Explain clearly and concretely based on the SOP/DOM/code context above\n✓ If suggesting changes, list them as bullet points in Python comments\n✓ Do NOT include markdown code fences"
+  : plan.seleniumOnly
+    ? "✓ Include create_stealth_driver() function with ALL anti-detection options listed above (Selenium only)"
+    : "✓ Include create_stealth_driver() and create_stealth_browser() functions with ALL anti-detection options listed above"}
 ✓ For each critical element (username, password, cookie banner button, navigation button, etc.), use a defensive locator pattern:
   - Primary: WebDriverWait with the exact id from the DOM (By.ID is mandatory when id exists).
   - Secondary: in except block, WebDriverWait using name or data-testid from the DOM.
@@ -595,9 +654,13 @@ ${hasCookiesProfile ? "✓ Scripts MUST load cookies_json dynamically at runtime
 
 ${contextSection ? "IMPORTANT: Follow the SOP/DOM workflow order exactly. Preserve all URLs, selectors, field names, and button labels from the context." : ""}
 
-Remember: Output ONLY raw Python code between the === delimiters. No triple backticks, no markdown formatting.
+${plan.intent === "explain"
+  ? "Remember: Output ONLY Python-commented text between the === delimiters (no markdown)."
+  : "Remember: Output ONLY raw Python code between the === delimiters. No triple backticks, no markdown formatting."}
 
-Generate complete, CAPTCHA-resistant scripts now.`;
+${plan.intent === "explain"
+  ? "Answer now."
+  : "Generate complete, CAPTCHA-resistant scripts now."}`;
 
     console.log("🚀 Calling Gemini (preflight) with ENHANCED anti-CAPTCHA LCI prompt...");
     console.log(`📊 Combined context length: ${combinedContext.length} characters`);
@@ -693,6 +756,18 @@ Generate complete, CAPTCHA-resistant scripts now.`;
       return slice.trim();
     };
 
+    const toPythonComments = (text: string): string => {
+      return text
+        .split("\n")
+        .map((line) => {
+          const trimmed = line.trim();
+          if (!trimmed) return "";
+          if (trimmed.startsWith("#")) return line;
+          return `# ${line}`;
+        })
+        .join("\n");
+    };
+
     let pythonSeleniumScript = stripCodeFences(
       extractBetweenMarkers(
         generatedContent,
@@ -700,6 +775,12 @@ Generate complete, CAPTCHA-resistant scripts now.`;
         "=== END_PYTHON_SELENIUM_SCRIPT ===",
       ),
     );
+
+    if (pythonSeleniumScript && plan.intent === "explain") {
+      pythonSeleniumScript = toPythonComments(pythonSeleniumScript);
+    }
+
+    const requirePlaywright = plan.requirePlaywright;
 
     let pythonPlaywrightScript = stripCodeFences(
       extractBetweenMarkers(
@@ -709,16 +790,21 @@ Generate complete, CAPTCHA-resistant scripts now.`;
       ),
     );
 
-    if (!pythonSeleniumScript || !pythonPlaywrightScript) {
+    if (!requirePlaywright) {
+      // Enforce contract: when Selenium-only or explanation mode is active, never return Playwright output.
+      pythonPlaywrightScript = null;
+    }
+
+    if (!pythonSeleniumScript || (requirePlaywright && !pythonPlaywrightScript)) {
       console.warn("⚠️  [Preflight] Primary parsing failed, attempting fallback...");
 
       const allPythonBlocks = generatedContent.match(/```(?:python|py)?[\s\S]*?```/gi);
 
-      if (allPythonBlocks && allPythonBlocks.length >= 2) {
-        console.log(`🔄 [Preflight] Found ${allPythonBlocks.length} code blocks, using first two`);
+      if (allPythonBlocks && (requirePlaywright ? allPythonBlocks.length >= 2 : allPythonBlocks.length >= 1)) {
+        console.log(`🔄 [Preflight] Found ${allPythonBlocks.length} code blocks, using ${requirePlaywright ? "first two" : "first"}`);
 
         pythonSeleniumScript = stripCodeFences(allPythonBlocks[0]);
-        pythonPlaywrightScript = stripCodeFences(allPythonBlocks[1]);
+        pythonPlaywrightScript = requirePlaywright ? stripCodeFences(allPythonBlocks[1]) : null;
 
         return new Response(
           JSON.stringify({
@@ -732,7 +818,7 @@ Generate complete, CAPTCHA-resistant scripts now.`;
             context_source: contextSource,
             sop_file: sopFileName,
             retrieval_method: "preflight_dom_long_context",
-            parsing_method: "fallback-code-fences",
+            parsing_method: requirePlaywright ? "fallback-code-fences" : "fallback-code-fences-selenium-only",
             anti_captcha_enabled: true,
             features: [
               "anti-bot-chrome-options",
@@ -780,9 +866,13 @@ Generate complete, CAPTCHA-resistant scripts now.`;
       );
     }
 
-    console.log("✅ [Preflight] Successfully parsed both scripts");
-    console.log(`📊 [Preflight] Selenium script: ${pythonSeleniumScript?.length || 0} characters`);
-    console.log(`📊 [Preflight] Playwright script: ${pythonPlaywrightScript?.length || 0} characters`);
+    console.log("✅ [Preflight] Successfully parsed output", {
+      intent: plan.intent,
+      seleniumOnly: plan.seleniumOnly,
+      hasPlaywright: !!pythonPlaywrightScript,
+      seleniumLength: pythonSeleniumScript?.length || 0,
+      playwrightLength: pythonPlaywrightScript?.length || 0,
+    });
 
     return new Response(
       JSON.stringify({
@@ -792,11 +882,13 @@ Generate complete, CAPTCHA-resistant scripts now.`;
           raw: generatedContent,
         },
         model_used: "gemini-2.5-flash",
+        intent: plan.intent,
+        selenium_only: plan.seleniumOnly,
         context_used: combinedContext.length,
         context_source: contextSource,
         sop_file: sopFileName,
         retrieval_method: "preflight_dom_long_context",
-        parsing_method: "primary-markers",
+        parsing_method: plan.requirePlaywright ? "primary-markers" : "primary-markers-selenium-only",
         anti_captcha_enabled: true,
         cookies_profile_present: hasCookiesProfile,
         features: [
