@@ -205,6 +205,11 @@ serve(async (req) => {
           const text = (el.text ?? "").toString().slice(0, 160);
           const attrs = el.attributes ?? {};
           const selector = el.suggested_selector ?? "";
+          const selectors: Array<{ by?: string; value?: string; stability?: number; reason?: string }> = Array.isArray(
+            el.selectors,
+          )
+            ? (el.selectors as Array<{ by?: string; value?: string; stability?: number; reason?: string }> )
+            : [];
           const score = typeof el.score === "number" ? el.score : undefined;
           const matchReasons: string[] = Array.isArray(el.match_reasons)
             ? (el.match_reasons as string[])
@@ -224,7 +229,20 @@ serve(async (req) => {
 
           const attrStr = attrBits.join(" ");
           let line = `- <${tag}${attrStr ? " " + attrStr : ""}> text=\"${text}\"`;
-          if (selector) {
+
+          const selectorBits: string[] = [];
+          for (const s of selectors.slice(0, 6)) {
+            const by = (s.by ?? "").toString();
+            const value = (s.value ?? "").toString();
+            if (!by || !value) continue;
+            const trimmed = value.length > 140 ? value.slice(0, 140) + "…" : value;
+            selectorBits.push(`${by}=${trimmed}`);
+          }
+
+          if (selectorBits.length) {
+            line += ` -> SELECTORS (validated): ${selectorBits.join(" | ")}`;
+          } else if (selector) {
+            // Backwards compatibility
             line += ` -> SUGGESTED SELECTOR: ${selector}`;
           }
 
@@ -380,7 +398,18 @@ CRITICAL SELECTOR RULES (UNIVERSAL ROBUSTNESS):
    - ONLY if no id is available, use a robust XPath with normalize-space(.) on the visible text or role.
    - Do NOT invent generic XPaths if the DOM context already provides a concrete id or data-testid.
 
-5. RESILIENT LOCATORS FOR LISTS:
+5. SELECTOR FALLBACKS + VALIDATION (MANDATORY):
+   - In the DOM context above, elements may include "SELECTORS (validated): ...".
+   - You MUST use those selector fallbacks (in order) when locating the element.
+   - You MUST validate each selector at runtime BEFORE using it:
+     - Selenium: use find_elements(...) and require exactly ONE match; also require is_displayed() == True.
+     - Playwright: use locator.count() == 1 and locator.first.is_visible() == True.
+   - If NO selector succeeds, you MUST raise a structured error (do not guess) that includes:
+     - **expected**: what element you were trying to find (step name + human description)
+     - **url**: current page URL
+     - **tried**: ordered list of selector attempts with their strategy (id/css/xpath) and match counts (or exception)
+
+6. RESILIENT LOCATORS FOR LISTS:
    - Prefer CSS selectors for lists: driver.find_elements(By.CSS_SELECTOR, "ul.search-results li a")
    - Use XPath with normalize-space(.) only for text matching on individual items.
 

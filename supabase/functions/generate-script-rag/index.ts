@@ -208,6 +208,11 @@ serve(async (req) => {
                     const text = (el.text ?? "").toString().slice(0, 120);
                     const attrs = el.attributes ?? {};
                     const selector = el.suggested_selector ?? "";
+                    const selectors: Array<{ by?: string; value?: string; stability?: number; reason?: string }> = Array.isArray(
+                      el.selectors,
+                    )
+                      ? (el.selectors as Array<{ by?: string; value?: string; stability?: number; reason?: string }> )
+                      : [];
 
                     const attrBits: string[] = [];
                     if (attrs.id) attrBits.push(`id=\"${attrs.id}\"`);
@@ -220,9 +225,23 @@ serve(async (req) => {
 
                     const attrStr = attrBits.join(" ");
                     let line = `- <${tag}${attrStr ? " " + attrStr : ""}> text=\"${text}\"`;
-                    if (selector) {
+
+                    const selectorBits: string[] = [];
+                    for (const s of selectors.slice(0, 6)) {
+                      const by = (s.by ?? "").toString();
+                      const value = (s.value ?? "").toString();
+                      if (!by || !value) continue;
+                      const trimmed = value.length > 140 ? value.slice(0, 140) + "…" : value;
+                      selectorBits.push(`${by}=${trimmed}`);
+                    }
+
+                    if (selectorBits.length) {
+                      line += ` -> SELECTORS (validated): ${selectorBits.join(" | ")}`;
+                    } else if (selector) {
+                      // Backwards compatibility
                       line += ` -> SUGGESTED SELECTOR: ${selector}`;
                     }
+
                     parts.push(line);
                   }
                 }
@@ -306,6 +325,17 @@ Generate automation output according to the OUTPUT MODE OVERRIDE section below.
 ${outputModeNote}
 
 ${contextSection ? "CRITICAL: Use the SOP/DOM/code context above as the source of truth for workflow steps, selectors, and fixes." : ""}
+
+SELECTOR FALLBACKS + VALIDATION (MANDATORY):
+- In the DOM context above, elements may include "SELECTORS (validated): ...".
+- You MUST use those selector fallbacks (in order) when locating the element.
+- You MUST validate each selector at runtime BEFORE using it:
+  - Selenium: use find_elements(...) and require exactly ONE match; also require is_displayed() == True.
+  - Playwright: use locator.count() == 1 and locator.first.is_visible() == True.
+- If NO selector succeeds, you MUST raise a structured error (do not guess) that includes:
+  - **expected**: what element you were trying to find (step name + human description)
+  - **url**: current page URL
+  - **tried**: ordered list of selector attempts with their strategy (id/css/xpath) and match counts (or exception)
 
 ================================================================================
 MANDATORY ANTI-DETECTION FEATURES (MUST INCLUDE IN ALL SCRIPTS)
