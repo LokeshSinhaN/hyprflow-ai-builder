@@ -425,8 +425,64 @@ export const ChatInterface = () => {
       return;
     }
 
-    // Require at least one indexed SOP with content before generating scripts
-    if (!sopDocuments.some((d) => d.status === "indexed" && d.content)) {
+    // Require SOP only when the user is asking to GENERATE automation code from scratch.
+    // Allow SOP-less follow-ups like "explain the code" / "list selectors" when we already have generated scripts.
+    const hasIndexedSop = sopDocuments.some((d) => d.status === "indexed" && d.content);
+    const hasPriorScripts = Boolean(
+      baseScripts?.python?.trim() ||
+        generatedScripts?.python?.trim() ||
+        baseScripts?.playwright?.trim() ||
+        generatedScripts?.playwright?.trim(),
+    );
+
+    const classifyUiIntent = (msg: string): "code" | "explain" => {
+      const m = (msg || "").toLowerCase();
+
+      const identityQuestion =
+        /\b(who\s+are\s+you|what\s+are\s+you|what\s+do\s+you\s+do|what\s+is\s+your\s+role|your\s+role|who\s+is\s+hyprtask|what\s+is\s+hyprtask)\b/.test(
+          m,
+        );
+      if (identityQuestion) return "explain";
+
+      const wantsExplain =
+        /\b(explain|explanation|walk me through|describe|breakdown|step[- ]by[- ]step)\b/.test(m) ||
+        /\b(selectors?|locators?|xpath|css selector|ids?)\b/.test(m) ||
+        /\b(above|previous|earlier|this)\b.*\b(code|script)\b/.test(m);
+
+      const wantsGenerateCode =
+        /\b(generate|write|create|implement|build)\b/.test(m) &&
+        /\b(script|automation|selenium|playwright|code)\b/.test(m);
+
+      return wantsExplain && !wantsGenerateCode ? "explain" : "code";
+    };
+
+    const uiIntent = classifyUiIntent(message);
+
+    // If user explicitly references an uploaded SOP/PDF by name, enforce that the document is actually present.
+    // This prevents "random" generations when the user expects the system to use a specific file.
+    const referencedPdfMatch = message.match(/([A-Za-z0-9][A-Za-z0-9 _\-]{0,120}\.pdf)\b/i);
+    const referencedPdfName = referencedPdfMatch?.[1]?.trim();
+    const mentionsUploadedDoc =
+      /\b(uploaded\s+(sop|pdf|file)|attached\s+(sop|pdf|file)|based\s+on\s+the\s+uploaded\s+(sop|pdf|file)|based\s+on\s+the\s+sop)\b/i.test(
+        message,
+      ) ||
+      Boolean(referencedPdfName);
+
+    const matchesUploadedTitle = referencedPdfName
+      ? sopDocuments.some(
+          (d) =>
+            d.status === "indexed" &&
+            typeof d.title === "string" &&
+            d.title.toLowerCase().includes(referencedPdfName.toLowerCase()),
+        )
+      : false;
+
+    if (uiIntent === "code" && mentionsUploadedDoc && (!hasIndexedSop || (referencedPdfName && !matchesUploadedTitle))) {
+      toast.error("Please upload the SOP/PDF you referenced before generating a script.");
+      return;
+    }
+
+    if (!hasIndexedSop && uiIntent === "code" && !hasPriorScripts) {
       toast.error("Please upload at least one SOP PDF before generating a script.");
       return;
     }
@@ -448,7 +504,7 @@ export const ChatInterface = () => {
     await saveMessage("user", userMessage);
 
     setIsProcessing(true);
-    setStatusMessage("Preparing your pre-flight job and scripts...");
+    setStatusMessage("Preparing your request...");
 
     let lastBackendCtx: { fn: string; stage: string } | null = null;
 
@@ -461,7 +517,10 @@ export const ChatInterface = () => {
 
       let functionResponse: any;
 
-      if (usePreflight && targetUrl.trim()) {
+      // Only run the pre-flight DOM pipeline when the user is actually asking for code generation.
+      const shouldUsePreflight = usePreflight && targetUrl.trim() && uiIntent === "code";
+
+      if (shouldUsePreflight) {
         // Pre-flight pipeline: create job -> wait for DOM -> generate script with DOM
         const cleaned = targetUrl.trim();
         setStatusMessage("Starting pre-flight DOM scan for your target URLs...");

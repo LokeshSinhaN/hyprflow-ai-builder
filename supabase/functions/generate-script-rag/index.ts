@@ -35,6 +35,7 @@ type OutputPlan = {
   explanationMode: ExplanationMode;
   // Keep for backwards compatibility in logs/metadata.
   includeExplanation: boolean;
+  identityQuestion: boolean;
 };
 
 const classifyPrompt = (message: string): OutputPlan => {
@@ -46,6 +47,11 @@ const classifyPrompt = (message: string): OutputPlan => {
 
   const wantsFix = /\b(fix|debug|resolve|repair|correct|update|patch|refactor)\b/.test(m);
 
+  const identityQuestion =
+    /\b(who\s+are\s+you|what\s+are\s+you|what\s+do\s+you\s+do|what\s+is\s+your\s+role|your\s+role|who\s+is\s+hyprtask|what\s+is\s+hyprtask)\b/.test(
+      m,
+    );
+
   // Natural language / analysis questions should default to explanation.
   const isQuestionStarter = /\b(how|what|why|where|who|when)\b/.test(m);
   const hasAnalysisKeywords = /\b(assess|evaluate|risk|fail|chances|chance|probability)\b/.test(m);
@@ -54,6 +60,7 @@ const classifyPrompt = (message: string): OutputPlan => {
     /\b(explain|explanation|how does|how do|walk me through|what does|describe|breakdown|step[- ]by[- ]step)\b/.test(m) ||
     /\b(tags?)\b/.test(m) ||
     /\b(selectors?|locators?|xpath|css selector)\b/.test(m) ||
+    identityQuestion ||
     isQuestionStarter ||
     hasAnalysisKeywords;
 
@@ -116,7 +123,12 @@ const classifyPrompt = (message: string): OutputPlan => {
 
   const includeExplanation = explanationMode !== "none";
 
-  return { intent, tool, explanationMode, includeExplanation };
+  // Identity/role questions must never generate scripts.
+  if (identityQuestion) {
+    return { intent: "explain", tool: "selenium", explanationMode: "full", includeExplanation: true, identityQuestion };
+  }
+
+  return { intent, tool, explanationMode, includeExplanation, identityQuestion };
 };
 
 serve(async (req) => {
@@ -139,13 +151,40 @@ serve(async (req) => {
       throw new Error("GEMINI_API_KEY not configured");
     }
 
+    const plan = classifyPrompt(message);
+
     let sopContext = sop_text || "";
     let contextSource = sopContext ? "frontend" : "none";
     let sopFileName = sopContext ? "Uploaded SOP" : "";
 
     if (!sopContext) {
-      console.warn("No SOP context provided; generating script from user request only.");
-      sopContext = "No SOP documents were provided. Generate script based on user request only.";
+      const hasPreviousScripts =
+        !!previous_scripts?.python?.trim() ||
+        (!!previous_scripts?.playwright && previous_scripts.playwright.trim().length > 0);
+
+      const referencesUploadedDoc =
+        /\b(uploaded\s+(sop|pdf|file)|attached\s+(sop|pdf|file)|based\s+on\s+the\s+uploaded\s+(sop|pdf|file)|based\s+on\s+the\s+sop)\b/i.test(
+          message,
+        ) ||
+        /\b[A-Za-z0-9][A-Za-z0-9 _\-]{0,120}\.pdf\b/i.test(message);
+
+      // If user asks to generate code "based on the uploaded SOP/PDF" but didn't provide sop_text, fail fast.
+      if (plan.intent === "code" && referencesUploadedDoc) {
+        return new Response(
+          JSON.stringify({ error: "Please upload the SOP/PDF you referenced before generating a script." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // SOP-less conversation should be allowed for explanations and follow-up questions about prior code.
+      if (plan.intent === "explain" || hasPreviousScripts) {
+        sopContext = "User is asking a general question or referring to previously generated code.";
+        contextSource = "none";
+        sopFileName = "";
+      } else {
+        console.warn("No SOP context provided; generating script from user request only.");
+        sopContext = "No SOP documents were provided. Generate script based on user request only.";
+      }
     }
 
     // Optionally enrich context with DOM from an existing pre-flight job so follow-up
@@ -281,8 +320,6 @@ serve(async (req) => {
       ? `\n\n=== COMPLETE WORKFLOW + DOM CONTEXT ===\n${combinedContext}\n=== END CONTEXT ===\n`
       : "";
 
-    const plan = classifyPrompt(message);
-
     const outputModeNote = `
 
 ================================================================================
@@ -291,11 +328,13 @@ OUTPUT MODE OVERRIDE (MUST FOLLOW)
 Intent: ${plan.intent}
 Tool: ${plan.tool}
 Explanation mode: ${plan.explanationMode}
+Identity question: ${plan.identityQuestion}
 
 - Always output content between the required delimiters.
 - If Intent is "explain":
   - Output ONLY a natural-language explanation in the CHAT_EXPLANATION section.
   - Leave BOTH script sections EMPTY.
+  - If Identity question is true: answer the user's identity/role question in CHAT_EXPLANATION and leave BOTH scripts EMPTY.
 - If Intent is "code":
   - Follow Explanation mode:
     - minimal: include ONLY "### Automation overview" and "### Limitations" in CHAT_EXPLANATION.
@@ -318,8 +357,11 @@ COOKIE INJECTION (MANDATORY WHEN COOKIES ARE PROVIDED):
 - If the workflow requires cookies or an authenticated session, implement an inject_cookies(...) helper that takes raw JSON cookie data at runtime (no hard-coded cookie values) and injects it into the browser context reliably.
 `;
 
-    // ENHANCED SYSTEM PROMPT WITH ALL ANTI-CAPTCHA INSTRUCTIONS
-    const systemPrompt = `You are an expert web automation engineer specializing in production-ready, CAPTCHA-RESISTANT browser automation.
+  // ENHANCED SYSTEM PROMPT WITH ALL ANTI-CAPTCHA INSTRUCTIONS
+  const systemPrompt = `You are HyprTask, an intelligent Digital Employee. Your role is to create robust browser automation scripts by analyzing Standard Operating Procedures (SOPs).
+When asked about your identity or role, respond professionally: 'I am acting as your Digital Employee by creating automation scripts based on your SOPs.'
+
+You are an expert web automation engineer specializing in production-ready, CAPTCHA-RESISTANT browser automation.
 
 Generate automation output according to the OUTPUT MODE OVERRIDE section below.
 ${outputModeNote}
@@ -664,7 +706,7 @@ ${plan.intent === "explain"
     console.log(`📁 SOP source: ${contextSource}`);
 
     const aiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -834,7 +876,7 @@ ${plan.intent === "explain"
         JSON.stringify({
           explanation,
           scripts: { python_selenium: "", python_playwright: null, raw: generatedContent },
-          model_used: "gemini-2.5-flash",
+          model_used: "gemini-2.5-flash-lite",
           intent: plan.intent,
           tool: plan.tool,
           include_explanation: plan.includeExplanation,
@@ -892,7 +934,7 @@ ${plan.intent === "explain"
               python_playwright: pythonPlaywrightScript,
               raw: generatedContent,
             },
-            model_used: "gemini-2.5-flash",
+            model_used: "gemini-2.5-flash-lite",
             intent: plan.intent,
             tool: plan.tool,
             include_explanation: plan.includeExplanation,
@@ -928,7 +970,7 @@ ${plan.intent === "explain"
             python_playwright: plan.tool === "playwright" ? cleanedRaw : null,
             raw: generatedContent,
           },
-          model_used: "gemini-2.5-flash",
+          model_used: "gemini-2.5-flash-lite",
           intent: plan.intent,
           tool: plan.tool,
           include_explanation: plan.includeExplanation,
@@ -964,7 +1006,7 @@ ${plan.intent === "explain"
           python_playwright: pythonPlaywrightScript,
           raw: generatedContent,
         },
-        model_used: "gemini-2.5-flash",
+        model_used: "gemini-2.5-flash-lite",
         intent: plan.intent,
         tool: plan.tool,
         include_explanation: plan.includeExplanation,
