@@ -33,10 +33,14 @@ const sanitizeDomSnippet = (html: string): string => {
 
 type OutputTool = "selenium" | "playwright" | "both";
 
+type ExplanationMode = "none" | "minimal" | "fix" | "full";
+
 type OutputPlan = {
   intent: "code" | "explain";
-  includeExplanation: boolean;
   tool: OutputTool;
+  explanationMode: ExplanationMode;
+  // Keep for backwards compatibility in logs/metadata.
+  includeExplanation: boolean;
 };
 
 const classifyPrompt = (message: string): OutputPlan => {
@@ -52,10 +56,17 @@ const classifyPrompt = (message: string): OutputPlan => {
     /\b(tags?)\b/.test(m) ||
     /\b(selectors?|locators?|xpath|css selector)\b/.test(m);
 
-  const wantsCode = /\b(generate|write|create|implement|script|code)\b/.test(m);
+  // Detect explicit code generation intent.
+  // IMPORTANT: Do NOT treat the word "code" alone as a request to generate code, because users often say
+  // "explain the above code".
+  const wantsGenerateCode =
+    /\b(generate|write|create|implement|build)\b/.test(m) &&
+    /\b(script|automation|selenium|playwright|code)\b/.test(m);
 
-  const intent: OutputPlan["intent"] = wantsCode || wantsFix ? "code" : wantsExplain ? "explain" : "code";
-  const includeExplanation = wantsExplain;
+  const refersToExistingCode = /\b(above|previous|earlier|this)\b.*\bcode\b/.test(m);
+
+  const intent: OutputPlan["intent"] =
+    wantsExplain && !wantsFix && (!wantsGenerateCode || refersToExistingCode) ? "explain" : "code";
 
   let tool: OutputTool = "selenium";
   if (wantsBoth || (hasSelenium && hasPlaywright)) {
@@ -66,7 +77,12 @@ const classifyPrompt = (message: string): OutputPlan => {
     tool = "selenium";
   }
 
-  return { intent, includeExplanation, tool };
+  const explanationMode: ExplanationMode =
+    intent === "explain" ? "full" : wantsExplain ? "full" : wantsFix ? "fix" : "minimal";
+
+  const includeExplanation = explanationMode !== "none";
+
+  return { intent, tool, explanationMode, includeExplanation };
 };
 
 serve(async (req) => {
@@ -273,18 +289,22 @@ serve(async (req) => {
 OUTPUT MODE OVERRIDE (MUST FOLLOW)
 ================================================================================
 Intent: ${plan.intent}
-Include explanation: ${plan.includeExplanation}
 Tool: ${plan.tool}
+Explanation mode: ${plan.explanationMode}
 
 - Always output content between the required delimiters.
 - If Intent is "explain":
   - Output ONLY a natural-language explanation in the CHAT_EXPLANATION section.
   - Leave BOTH script sections EMPTY.
 - If Intent is "code":
-  - If Include explanation is true, also fill CHAT_EXPLANATION (no code).
-  - If Tool is "selenium": output ONLY the Selenium script and leave Playwright EMPTY.
-  - If Tool is "playwright": output ONLY the Playwright script and leave Selenium EMPTY.
-  - If Tool is "both": output BOTH scripts.
+  - Follow Explanation mode:
+    - minimal: include ONLY "### Automation overview" and "### Limitations" in CHAT_EXPLANATION.
+    - fix: include ONLY "### Fix summary" and "### Limitations" in CHAT_EXPLANATION.
+    - full: include a full structured explanation in CHAT_EXPLANATION.
+  - Tool output rules:
+    - selenium: output ONLY the Selenium script and leave Playwright EMPTY.
+    - playwright: output ONLY the Playwright script and leave Selenium EMPTY.
+    - both: output BOTH scripts.
 
 CHAT_EXPLANATION RULES (MANDATORY when present):
 - Must be structured Markdown and glanceable (short sections + lists).
@@ -655,9 +675,13 @@ ${plan.intent === "explain"
       ? "Generate ONE complete script using Playwright only (leave Selenium empty)."
       : "Generate ONE complete script using Selenium only (leave Playwright empty)."}
 
-${plan.intent === "code" && plan.includeExplanation
-  ? "Also include a structured Markdown explanation in CHAT_EXPLANATION (no code)."
-  : ""}
+${plan.intent === "code" && plan.explanationMode === "minimal"
+  ? "In CHAT_EXPLANATION, include ONLY two sections: ### Automation overview and ### Limitations. Keep them short (3–6 bullets each)."
+  : plan.intent === "code" && plan.explanationMode === "fix"
+    ? "In CHAT_EXPLANATION, include ONLY: ### Fix summary and ### Limitations. Keep it short and concrete (bullets)."
+    : plan.intent === "code" && plan.explanationMode === "full"
+      ? "Also include a structured Markdown explanation in CHAT_EXPLANATION (no code)."
+      : ""}
 
 CRITICAL REQUIREMENTS CHECKLIST:
 ${plan.intent === "explain"

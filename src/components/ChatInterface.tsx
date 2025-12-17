@@ -597,20 +597,16 @@ export const ChatInterface = () => {
       const hasAnyCode = Boolean(pythonScript) || Boolean(playwrightScript);
       const explanation = explanationRaw?.trim() ? sanitizeChatExplanation(explanationRaw) : "";
 
-      // If we have an explanation, always show it in the chat stream (never as an artifact).
-      if (explanation) {
+      // Explanation-only responses: show only explanation in the chat stream.
+      if (intent === "explain" && !hasAnyCode) {
         const assistantExplainMessage: ChatMessage = {
           id: newId(),
           role: "assistant",
           kind: "text",
-          content: explanation,
+          content: explanation || "No explanation returned.",
         };
         setMessages((prev) => [...prev, assistantExplainMessage]);
-        await saveMessage("assistant", explanation);
-      }
-
-      // Explanation-only responses: no artifacts.
-      if (intent === "explain" && !hasAnyCode) {
+        await saveMessage("assistant", assistantExplainMessage.content);
         return;
       }
 
@@ -688,7 +684,9 @@ export const ChatInterface = () => {
         id: newId(),
         role: "assistant",
         kind: "artifact",
-        intro: "Generated code artifacts:",
+        intro: explanation
+          ? `${explanation}\n\n### Generated code artifacts`
+          : "### Generated code artifacts",
         artifacts: refs,
       };
 
@@ -1014,11 +1012,34 @@ export const ChatInterface = () => {
                         <p className={cn("text-sm text-white", "leading-relaxed")}>{msg.content}</p>
                       )
                     ) : (
-                      <div>
-                        <p className={cn("text-sm", msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed")}>
+                    <div>
+                      <div className={cn("text-sm", msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed", "text-white/90")}>
+                        <ReactMarkdown
+                          components={{
+                            h3: ({ node, className, ...props }) => (
+                              <h3
+                                {...props}
+                                className={cn("mt-4 mb-2 text-sm font-semibold text-white", className)}
+                              />
+                            ),
+                            strong: ({ node, className, ...props }) => (
+                              <strong {...props} className={cn("font-semibold text-white", className)} />
+                            ),
+                            ul: ({ node, className, ...props }) => (
+                              <ul {...props} className={cn("list-disc pl-5 space-y-1", className)} />
+                            ),
+                            li: ({ node, className, ...props }) => (
+                              <li {...props} className={cn("text-white/90", className)} />
+                            ),
+                            p: ({ node, className, ...props }) => (
+                              <p {...props} className={cn("text-white/90", className)} />
+                            ),
+                          }}
+                        >
                           {msg.intro}
-                        </p>
-                        {msg.artifacts.map((a) => (
+                        </ReactMarkdown>
+                      </div>
+                      {msg.artifacts.map((a) => (
                           <ArtifactCard
                             key={a.version_id}
                             artifact={a}

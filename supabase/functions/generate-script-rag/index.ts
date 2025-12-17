@@ -27,10 +27,14 @@ const sanitizeDomSnippet = (html: string): string => {
 
 type OutputTool = "selenium" | "playwright" | "both";
 
+type ExplanationMode = "none" | "minimal" | "fix" | "full";
+
 type OutputPlan = {
   intent: "code" | "explain";
-  includeExplanation: boolean;
   tool: OutputTool;
+  explanationMode: ExplanationMode;
+  // Keep for backwards compatibility in logs/metadata.
+  includeExplanation: boolean;
 };
 
 const classifyPrompt = (message: string): OutputPlan => {
@@ -41,18 +45,42 @@ const classifyPrompt = (message: string): OutputPlan => {
   const wantsBoth = /\b(both|two scripts|two versions|selenium and playwright|playwright and selenium)\b/.test(m);
 
   const wantsFix = /\b(fix|debug|resolve|repair|correct|update|patch|refactor)\b/.test(m);
+
+  // Natural language / analysis questions should default to explanation.
+  const isQuestionStarter = /\b(how|what|why|where|who|when)\b/.test(m);
+  const hasAnalysisKeywords = /\b(assess|evaluate|risk|fail|chances|chance|probability)\b/.test(m);
+
   const wantsExplain =
     /\b(explain|explanation|how does|how do|walk me through|what does|describe|breakdown|step[- ]by[- ]step)\b/.test(m) ||
     /\b(tags?)\b/.test(m) ||
-    /\b(selectors?|locators?|xpath|css selector)\b/.test(m);
+    /\b(selectors?|locators?|xpath|css selector)\b/.test(m) ||
+    isQuestionStarter ||
+    hasAnalysisKeywords;
 
-  // Detect explicit code generation intent (including "generate another piece of code").
-  const wantsCode = /\b(generate|write|create|implement|script|code)\b/.test(m);
+  // Detect explicit script generation intent.
+  // IMPORTANT: Do NOT treat the word "code" alone as a request to generate code, because users often say
+  // "explain the above code".
+  const wantsGenerateCode =
+    /\b(generate|write|create|implement|build)\b/.test(m) &&
+    /\b(script|automation|selenium|playwright|code)\b/.test(m);
 
-  // If user asks to fix/modify or generate code, treat as code output.
-  // Explanation can be included alongside code.
-  const intent: OutputPlan["intent"] = wantsCode || wantsFix ? "code" : wantsExplain ? "explain" : "code";
-  const includeExplanation = wantsExplain;
+  // Strong signal that the user actually wants code output.
+  const explicitlySaysGenerateScript = /\bgenerate\b[\s\S]*\bscript\b/.test(m);
+
+  const refersToExistingCode = /\b(above|previous|earlier|this)\b.*\bcode\b/.test(m);
+
+  const conceptualQuestion = (wantsExplain || isQuestionStarter || hasAnalysisKeywords) && !wantsFix;
+
+  // Intent rules:
+  // - If user asks conceptual questions (cookies, risk, probability, selectors) and does NOT explicitly say
+  //   "generate ... script", default to explanation.
+  // - Otherwise, allow code intent when they are clearly asking to generate.
+  const intent: OutputPlan["intent"] =
+    conceptualQuestion && !explicitlySaysGenerateScript && !wantsGenerateCode
+      ? "explain"
+      : wantsExplain && !wantsFix && (!wantsGenerateCode || refersToExistingCode)
+        ? "explain"
+        : "code";
 
   // Tool selection:
   // - DEFAULT: Selenium only.
@@ -68,7 +96,27 @@ const classifyPrompt = (message: string): OutputPlan => {
     tool = "selenium";
   }
 
-  return { intent, includeExplanation, tool };
+  // Explanation behavior:
+  // - explain intent: full explanation only
+  // - code intent:
+  //   - if user asked for explanation: full
+  //   - if this is a fix/refactor/debug: fix notes
+  //   - otherwise (generate code): minimal (Automation overview + Limitations)
+  // - conceptual questions: always force full
+  const explanationMode: ExplanationMode =
+    conceptualQuestion && !explicitlySaysGenerateScript
+      ? "full"
+      : intent === "explain"
+        ? "full"
+        : wantsExplain
+          ? "full"
+          : wantsFix
+            ? "fix"
+            : "minimal";
+
+  const includeExplanation = explanationMode !== "none";
+
+  return { intent, tool, explanationMode, includeExplanation };
 };
 
 serve(async (req) => {
@@ -222,18 +270,22 @@ serve(async (req) => {
 OUTPUT MODE OVERRIDE (MUST FOLLOW)
 ================================================================================
 Intent: ${plan.intent}
-Include explanation: ${plan.includeExplanation}
 Tool: ${plan.tool}
+Explanation mode: ${plan.explanationMode}
 
 - Always output content between the required delimiters.
 - If Intent is "explain":
   - Output ONLY a natural-language explanation in the CHAT_EXPLANATION section.
   - Leave BOTH script sections EMPTY.
 - If Intent is "code":
-  - If Include explanation is true, also fill CHAT_EXPLANATION (no code).
-  - If Tool is "selenium": output ONLY the Selenium script and leave Playwright EMPTY.
-  - If Tool is "playwright": output ONLY the Playwright script and leave Selenium EMPTY.
-  - If Tool is "both": output BOTH scripts.
+  - Follow Explanation mode:
+    - minimal: include ONLY "### Automation overview" and "### Limitations" in CHAT_EXPLANATION.
+    - fix: include ONLY "### Fix summary" and "### Limitations" in CHAT_EXPLANATION.
+    - full: include a full structured explanation in CHAT_EXPLANATION.
+  - Tool output rules:
+    - selenium: output ONLY the Selenium script and leave Playwright EMPTY.
+    - playwright: output ONLY the Playwright script and leave Selenium EMPTY.
+    - both: output BOTH scripts.
 
 CHAT_EXPLANATION RULES (MANDATORY when present):
 - Must be structured Markdown and glanceable (short sections + lists).
@@ -541,9 +593,13 @@ ${plan.intent === "explain"
       ? "Generate ONE complete script using Playwright only (leave Selenium empty)."
       : "Generate ONE complete script using Selenium only (leave Playwright empty)."}
 
-${plan.intent === "code" && plan.includeExplanation
-  ? "Also include a structured Markdown explanation in CHAT_EXPLANATION (no code)."
-  : ""}
+${plan.intent === "code" && plan.explanationMode === "minimal"
+  ? "In CHAT_EXPLANATION, include ONLY two sections: ### Automation overview and ### Limitations. Keep them short (3–6 bullets each)."
+  : plan.intent === "code" && plan.explanationMode === "fix"
+    ? "In CHAT_EXPLANATION, include ONLY: ### Fix summary and ### Limitations. Keep it short and concrete (bullets)."
+    : plan.intent === "code" && plan.explanationMode === "full"
+      ? "Also include a structured Markdown explanation in CHAT_EXPLANATION (no code)."
+      : ""}
 
 CRITICAL REQUIREMENTS CHECKLIST:
 ${plan.intent === "explain"
