@@ -368,6 +368,54 @@ export const ChatInterface = () => {
     return;
   };
 
+  const formatBackendError = (
+    err: unknown,
+    ctx?: { fn: string; stage: string } | null,
+  ): { toast: string; chat: string } => {
+    const anyErr = err as any;
+    const rawMessage = (anyErr?.message ?? "") as string;
+    const status = anyErr?.context?.status ?? anyErr?.status ?? anyErr?.statusCode;
+    const code = anyErr?.context?.code ?? anyErr?.code;
+
+    let type = "Unexpected backend error";
+    let nextStep = "Retry in a moment. If it keeps failing, check the Edge Function logs.";
+
+    if (status === 429 || code === "RATE_LIMIT" || /rate limit/i.test(rawMessage)) {
+      type = "Rate limit reached";
+      nextStep = "Wait ~30–60 seconds and try again.";
+    } else if (status === 400 || code === "INVALID_REQUEST") {
+      type = "Invalid request";
+      nextStep = "Try rephrasing the prompt or re-upload the SOP, then retry.";
+    } else if (status === 401 || status === 403) {
+      type = "Authorization error";
+      nextStep = "Check Supabase keys/config and permissions for the Edge Function.";
+    } else if (status === 404) {
+      type = "Function not found";
+      nextStep = "Verify the Edge Function is deployed and the name matches.";
+    } else if (typeof status === "number" && status >= 500) {
+      type = "Server error";
+      nextStep = "Check Edge Function logs for the crash details, then retry.";
+    } else if (/failed to fetch|network/i.test(rawMessage)) {
+      type = "Network error";
+      nextStep = "Check your connection and try again.";
+    } else if (/non-2xx/i.test(rawMessage)) {
+      type = "Edge Function returned an error";
+      nextStep = "Open the Network tab to see the function response, or check Edge Function logs.";
+    }
+
+    const where = ctx?.fn ? `${ctx.fn}${ctx.stage ? ` (${ctx.stage})` : ""}` : "backend";
+    const statusLabel = typeof status === "number" ? ` (HTTP ${status})` : "";
+
+    return {
+      toast: `${type}${statusLabel}`,
+      chat:
+        `### Backend error\n` +
+        `- **Where:** ${where}\n` +
+        `- **Type:** **${type}${statusLabel}**\n` +
+        `- **Next step:** ${nextStep}`,
+    };
+  };
+
   const handleSend = async () => {
     if (!message.trim()) return;
 
@@ -402,6 +450,8 @@ export const ChatInterface = () => {
     setIsProcessing(true);
     setStatusMessage("Preparing your pre-flight job and scripts...");
 
+    let lastBackendCtx: { fn: string; stage: string } | null = null;
+
     try {
       // Build optional SOP context from locally uploaded documents.
       const sopContext = sopDocuments
@@ -422,6 +472,7 @@ export const ChatInterface = () => {
 
         const primaryUrl = urlList[0];
 
+        lastBackendCtx = { fn: "preflight-job", stage: "starting DOM capture" };
         const { data: startData, error: startError } = await supabase.functions.invoke("preflight-job", {
           body: {
             target_url: primaryUrl,
@@ -444,6 +495,7 @@ export const ChatInterface = () => {
 
         setStatusMessage("DOM captured successfully. Generating final automation scripts...");
 
+        lastBackendCtx = { fn: "generate-script-preflight", stage: "generating scripts" };
         const { data: scriptData, error: scriptError } = await supabase.functions.invoke(
           "generate-script-preflight",
           {
@@ -460,6 +512,7 @@ export const ChatInterface = () => {
       } else {
         // RAG-only pipeline (no new pre-flight DOM capture)
         setStatusMessage("Generating automation scripts from your SOP and existing context...");
+        lastBackendCtx = { fn: "generate-script-rag", stage: "generating scripts" };
         const { data, error } = await supabase.functions.invoke("generate-script-rag", {
           body: {
             message: userMessage,
@@ -650,20 +703,19 @@ export const ChatInterface = () => {
       }
     } catch (error) {
       console.error("Error generating script:", error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to generate script. Please try again.";
-      toast.error(errorMessage);
-      setStatusMessage(`Something went wrong: ${errorMessage}`);
 
-      // Also surface an assistant message in the chat so the error is visible in history
+      const formatted = formatBackendError(error, lastBackendCtx);
+      toast.error(formatted.toast);
+      setStatusMessage(formatted.toast);
+
+      // Surface a helpful assistant message in the chat so the error is visible in history
       setMessages((prev) => [
         ...prev,
         {
           id: newId(),
           role: "assistant",
           kind: "text",
-          content:
-            "I ran into an error while preparing your scripts: " +
-            (error instanceof Error ? error.message : "Unknown error."),
+          content: formatted.chat,
         },
       ]);
     } finally {
