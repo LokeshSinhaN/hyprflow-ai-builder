@@ -213,6 +213,8 @@ export const ChatInterface = () => {
   const [sopDocuments, setSopDocuments] = useState<SOPDocument[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [displayStatusMessage, setDisplayStatusMessage] = useState<string | null>(null);
+  const [isStatusFading, setIsStatusFading] = useState(false);
   const [showConfigForm, setShowConfigForm] = useState(false);
   const [configEntries, setConfigEntries] = useState<ScriptConfigEntry[]>([]);
   const [targetUrl, setTargetUrl] = useState("");
@@ -261,6 +263,28 @@ export const ChatInterface = () => {
       setCurrentConversationId("local-conversation");
     }
   }, [currentConversationId]);
+
+  // Smoothly fade the status line whenever the backend status message updates.
+  useEffect(() => {
+    setIsStatusFading(true);
+    const t = setTimeout(() => {
+      setDisplayStatusMessage(statusMessage);
+      setIsStatusFading(false);
+    }, 140);
+
+    return () => clearTimeout(t);
+  }, [statusMessage]);
+
+  // Keep the inline loading bubble pinned at the bottom of the scroll view while generating.
+  useEffect(() => {
+    if (!isProcessing) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    requestAnimationFrame(() => {
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    });
+  }, [isProcessing, statusMessage, displayStatusMessage, messages.length]);
 
   const handleDeleteSOP = (sopId: string) => {
     // Local-only delete; we don't touch the database in dev mode.
@@ -870,7 +894,7 @@ export const ChatInterface = () => {
       {/* Chat Column */}
       <div
         className={cn(
-          "min-w-0 min-h-0 flex flex-col overflow-hidden transition-all duration-300 ease-in-out",
+          "relative min-w-0 min-h-0 flex flex-col overflow-hidden transition-all duration-300 ease-in-out",
           isCanvasOpen ? "basis-[45%] gap-4" : "w-full max-w-[800px] gap-6",
         )}
       >
@@ -999,12 +1023,30 @@ export const ChatInterface = () => {
                 </div>
               </Card>
             )}
+
+            {/* Inline Gemini-style loading bubble (renders like an assistant message) */}
+            {isProcessing && (
+              <Card className="p-4 border-0 bg-transparent mr-auto max-w-[85%]">
+                <div className="flex items-center gap-3">
+                  <div className="p-1.5 rounded-md bg-white/5 border border-white/10 animate-pulse">
+                    <img src={logo} alt="Hyprtask" className="w-4 h-4 rounded" draggable={false} />
+                  </div>
+                  <p
+                    className={cn(
+                      "text-xs text-white/70 transition-opacity duration-200",
+                      isStatusFading ? "opacity-0" : "opacity-100",
+                    )}
+                  >
+                    {displayStatusMessage ?? statusMessage ?? "Working on your request..."}
+                  </p>
+                </div>
+              </Card>
+            )}
           </div>
         )}
 
         {/* Prompt Composer */}
-        <div className={cn(isLandingState ? "flex-1 flex items-center" : "")}
-        >
+        <div className={cn(isLandingState ? "flex-1 flex items-center" : "")}>
           <div className="w-full rounded-2xl border border-white/10 bg-[#0f172a]/80 backdrop-blur-[12px] p-3 shadow-sm transition-all duration-300 ease-in-out">
             {/* Attached SOPs (show inside prompt box) */}
             {sopDocuments.length > 0 && (
@@ -1166,6 +1208,7 @@ export const ChatInterface = () => {
             </div>
           </div>
         </div>
+
       </div>
 
       {/* Right Panel - Artifacts Canvas */}
