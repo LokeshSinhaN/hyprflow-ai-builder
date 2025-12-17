@@ -316,7 +316,7 @@ Explanation mode: ${plan.explanationMode}
   - Leave BOTH script sections EMPTY.
 - If Intent is "code":
   - Follow Explanation mode:
-    - minimal: include ONLY "### Automation overview" and "### Limitations" in CHAT_EXPLANATION.
+    - minimal: TEXT SUMMARY ONLY in CHAT_EXPLANATION (no code, no code fences). Include ONLY "### Automation overview" and "### Limitations".
     - fix: include ONLY "### Fix summary" and "### Limitations" in CHAT_EXPLANATION.
     - full: include a full structured explanation in CHAT_EXPLANATION.
   - Tool output rules:
@@ -328,6 +328,7 @@ CHAT_EXPLANATION RULES (MANDATORY when present):
 - Must be structured Markdown and glanceable (short sections + lists).
 - Formatting rules: use ONLY "###" headings, "- " bullets, and "**bold**" emphasis.
 - NEVER include code fences (no triple backticks) or runnable scripts.
+- CRITICAL: The CHAT_EXPLANATION block is for TEXT ONLY. You must output the closing === END_CHAT_EXPLANATION === tag IMMEDIATELY after the 'Limitations' section. DO NOT write any code until you have opened the === PYTHON_SELENIUM_SCRIPT === block.
 
 GLOBAL OUTPUT RULE:
 - NEVER output anything outside the required delimiter sections.
@@ -704,8 +705,10 @@ ${plan.intent === "explain"
       ? "Generate ONE complete script using Playwright only (leave Selenium empty)."
       : "Generate ONE complete script using Selenium only (leave Playwright empty)."}
 
+${plan.intent === "code" ? "FAILSAFE: If you include Python code inside the chat explanation, the response will be rejected. Output code ONLY in the dedicated script sections." : ""}
+
 ${plan.intent === "code" && plan.explanationMode === "minimal"
-  ? "In CHAT_EXPLANATION, include ONLY two sections: ### Automation overview and ### Limitations. Keep them short (3–6 bullets each)."
+  ? "In CHAT_EXPLANATION, include ONLY two sections: ### Automation overview and ### Limitations. Text summary only. No code fences. Keep them short (3–6 bullets each)."
   : plan.intent === "code" && plan.explanationMode === "fix"
     ? "In CHAT_EXPLANATION, include ONLY: ### Fix summary and ### Limitations. Keep it short and concrete (bullets)."
     : plan.intent === "code" && plan.explanationMode === "full"
@@ -753,7 +756,7 @@ ${plan.intent === "explain"
     console.log(`📁 SOP source: ${contextSource}`);
 
     const aiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiApiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -918,7 +921,7 @@ ${plan.intent === "explain"
         JSON.stringify({
           explanation: explanation ?? "",
           scripts: { python_selenium: "", python_playwright: null, raw: generatedContent },
-          model_used: "gemini-2.5-flash",
+          model_used: "gemini-2.5-flash-lite",
           intent: plan.intent,
           tool: plan.tool,
           include_explanation: plan.includeExplanation,
@@ -974,7 +977,7 @@ ${plan.intent === "explain"
               python_playwright: pythonPlaywrightScript,
               raw: generatedContent,
             },
-            model_used: "gemini-2.5-flash",
+            model_used: "gemini-2.5-flash-lite",
             intent: plan.intent,
             tool: plan.tool,
             include_explanation: plan.includeExplanation,
@@ -1012,7 +1015,7 @@ ${plan.intent === "explain"
             python_playwright: plan.tool === "playwright" ? cleanedRaw : null,
             raw: generatedContent,
           },
-          model_used: "gemini-2.5-flash",
+          model_used: "gemini-2.5-flash-lite",
           intent: plan.intent,
           tool: plan.tool,
           include_explanation: plan.includeExplanation,
@@ -1047,7 +1050,7 @@ ${plan.intent === "explain"
           python_playwright: pythonPlaywrightScript,
           raw: generatedContent,
         },
-        model_used: "gemini-2.5-flash",
+        model_used: "gemini-2.5-flash-lite",
         intent: plan.intent,
         tool: plan.tool,
         include_explanation: plan.includeExplanation,
