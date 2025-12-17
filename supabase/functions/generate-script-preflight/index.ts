@@ -265,7 +265,12 @@ Selenium only: ${plan.seleniumOnly}
 - Always output content between the required delimiters.
 - If Intent is "explain":
   - Output ONLY a natural-language explanation in the CHAT_EXPLANATION section.
-  - The explanation MUST be structured Markdown (headings, bullet points) and MUST NOT include code fences or runnable scripts.
+  - The explanation MUST be structured Markdown and MUST be glanceable (short sections + lists).
+  - Formatting rules (MANDATORY):
+    - Use ONLY "###" for headings (never "#" or "##").
+    - Use "- " for bullet points.
+    - Use "**bold**" for emphasis.
+  - NEVER include code fences (no triple backticks) or runnable scripts.
   - Leave BOTH script sections EMPTY.
 - If Intent is "code" and Selenium only is true:
   - Output ONLY the Selenium script.
@@ -428,7 +433,7 @@ DO NOT IMPLEMENT (Out-of-Browser Actions):
 You MUST return your response in this EXACT format with these EXACT delimiters:
 
 === CHAT_EXPLANATION ===
-[Optional. Structured Markdown explanation only. No code fences. No runnable scripts.]
+[Optional. Structured Markdown explanation only. MUST follow formatting rules: use "###" headings, "-" bullets, and "**bold**" emphasis. No code fences. No runnable scripts.]
 === END_CHAT_EXPLANATION ===
 
 === PYTHON_SELENIUM_SCRIPT ===
@@ -627,14 +632,14 @@ Generate both scripts now following ALL requirements above.`;
 **User Request:** ${message}
 
 ${plan.intent === "explain"
-  ? "Provide an explanation / fix guidance (NO runnable code). Put it ONLY in the CHAT_EXPLANATION section as structured Markdown (headings + bullet points). Leave BOTH script sections empty."
+  ? "Provide an explanation / fix guidance (NO runnable code). Put it ONLY in the CHAT_EXPLANATION section as structured Markdown. Formatting rules: use ONLY '###' headings (never '#' or '##'), use '- ' bullets, and use '**bold**' emphasis. Keep it glanceable (short sections + lists). Leave BOTH script sections empty."
   : plan.seleniumOnly
     ? "Generate ONE complete, production-ready Python script using Selenium only (do NOT generate Playwright)."
     : "Generate TWO complete, production-ready Python scripts (Selenium and Playwright)."}
 
 CRITICAL REQUIREMENTS CHECKLIST:
 ${plan.intent === "explain"
-  ? "✓ Explain clearly and concretely based on the SOP/DOM/code context above\n✓ Use structured Markdown (headings + bullet points)\n✓ Do NOT include code fences or runnable scripts"
+  ? "✓ Explain clearly and concretely based on the SOP/DOM/code context above\n✓ Use structured Markdown with ONLY '###' headings\n✓ Use '- ' bullets and '**bold**' emphasis\n✓ Keep it glanceable (no walls of text)\n✓ Do NOT include code fences or runnable scripts"
   : plan.seleniumOnly
     ? "✓ Include create_stealth_driver() function with ALL anti-detection options listed above (Selenium only)"
     : "✓ Include create_stealth_driver() and create_stealth_browser() functions with ALL anti-detection options listed above"}
@@ -659,7 +664,7 @@ ${hasCookiesProfile ? "✓ Scripts MUST load cookies_json dynamically at runtime
 ${contextSection ? "IMPORTANT: Follow the SOP/DOM workflow order exactly. Preserve all URLs, selectors, field names, and button labels from the context." : ""}
 
 ${plan.intent === "explain"
-  ? "Remember: Output ONLY a Markdown explanation in CHAT_EXPLANATION (no code fences, no scripts) and leave both script sections empty."
+  ? "Remember: Output ONLY a Markdown explanation in CHAT_EXPLANATION that follows the formatting rules (### headings, - bullets, **bold**). No code fences, no scripts; leave both script sections empty."
   : "Remember: Output ONLY raw Python code between the === delimiters. No triple backticks, no markdown formatting."}
 
 ${plan.intent === "explain"

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
@@ -455,7 +456,36 @@ export const ChatInterface = () => {
 
       const sanitizeChatExplanation = (text: string): string => {
         // Hard guarantee: never allow fenced code blocks into the chat stream.
-        return text.replace(/```[\s\S]*?```/g, "\n\n(Implementation moved to the Code Canvas.)\n\n").trim();
+        let cleaned = text.replace(
+          /```[\s\S]*?```/g,
+          "\n\n(Implementation moved to the Code Canvas.)\n\n",
+        );
+
+        // Normalize headings: allow only '### ' headings in chat stream.
+        cleaned = cleaned
+          .split("\n")
+          .map((line) => {
+            const trimmed = line.trimStart();
+            if (/^#{1,6}\s+/.test(trimmed)) {
+              return "### " + trimmed.replace(/^#{1,6}\s+/, "");
+            }
+            return line;
+          })
+          .join("\n");
+
+        // Ensure headers are treated as separate markdown blocks.
+        // Force blank lines before every '###' heading.
+        cleaned = cleaned.replace(/(^|\n)\s*(###\s+)/g, "\n\n### ");
+        cleaned = cleaned.replace(/^\s*\n+/, "");
+
+        // Normalize bullets: prefer '- ' for list items.
+        cleaned = cleaned
+          .split("\n")
+          .map((line) => line.replace(/^\s*\*\s+/, "- "))
+          .map((line) => line.replace(/^\s*•\s+/, "- "))
+          .join("\n");
+
+        return cleaned.trim();
       };
 
       const intent = (functionResponse.intent as string | undefined) ?? undefined;
@@ -827,9 +857,42 @@ export const ChatInterface = () => {
 
                   <div className="min-w-0 flex-1">
                     {msg.kind === "text" ? (
-                      <p className={cn("text-sm", msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed")}>
-                        {msg.content}
-                      </p>
+                      msg.role === "assistant" ? (
+                        <div
+                          className={cn(
+                            "text-sm",
+                            msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed",
+                            "text-white/90",
+                          )}
+                        >
+                          <ReactMarkdown
+                            components={{
+                              h3: ({ node, className, ...props }) => (
+                                <h3
+                                  {...props}
+                                  className={cn("mt-4 mb-2 text-sm font-semibold text-white", className)}
+                                />
+                              ),
+                              strong: ({ node, className, ...props }) => (
+                                <strong {...props} className={cn("font-semibold text-white", className)} />
+                              ),
+                              ul: ({ node, className, ...props }) => (
+                                <ul {...props} className={cn("list-disc pl-5 space-y-1", className)} />
+                              ),
+                              li: ({ node, className, ...props }) => (
+                                <li {...props} className={cn("text-white/90", className)} />
+                              ),
+                              p: ({ node, className, ...props }) => (
+                                <p {...props} className={cn("text-white/90", className)} />
+                              ),
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <p className={cn("text-sm text-white", "leading-relaxed")}>{msg.content}</p>
+                      )
                     ) : (
                       <div>
                         <p className={cn("text-sm", msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed")}>

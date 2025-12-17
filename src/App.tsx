@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { CanvasProvider } from "@/hooks/useCanvas";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import Library from "./pages/Library";
@@ -24,8 +25,9 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
-          <CanvasProvider>
-            <Routes>
+          <ErrorBoundary title="Hyprtask UI Error">
+            <CanvasProvider>
+              <Routes>
               <Route path="/auth" element={<Auth />} />
               <Route path="/" element={<Index />} />
               <Route
@@ -62,8 +64,9 @@ const App = () => (
               />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
-            </Routes>
-          </CanvasProvider>
+              </Routes>
+            </CanvasProvider>
+          </ErrorBoundary>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
