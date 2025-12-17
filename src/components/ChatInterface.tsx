@@ -3,8 +3,9 @@ import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Upload, Camera, Send, Sparkles, History } from "lucide-react";
+import { Upload, Camera, Send, History } from "lucide-react";
 import { toast } from "sonner";
+import logo from "@/assets/logo.png";
 import { supabase } from "@/integrations/supabase/client";
 import { ChatHistory } from "./ChatHistory";
 import { ArtifactCard, type ArtifactRef } from "./ArtifactCard";
@@ -888,8 +889,13 @@ export const ChatInterface = () => {
               >
                 <div className="flex items-start gap-3">
                   {msg.role === "assistant" && (
-                    <div className="p-1.5 rounded-md bg-gradient-primary shadow-glow">
-                      <Sparkles className="w-4 h-4 text-accent-foreground" />
+                    <div className="p-1.5 rounded-md bg-white/5 border border-white/10">
+                      <img
+                        src={logo}
+                        alt="Hyprtask"
+                        className="w-4 h-4 rounded"
+                        draggable={false}
+                      />
                     </div>
                   )}
 
@@ -1175,8 +1181,8 @@ export const ChatInterface = () => {
         {isProcessing && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">
-              <div className="p-3 rounded-full bg-gradient-to-tr from-accent to-primary shadow-glow">
-                <Sparkles className="w-6 h-6 text-primary-foreground animate-pulse" />
+              <div className="p-3 rounded-full bg-white/5 border border-white/10">
+                <img src={logo} alt="Hyprtask" className="w-6 h-6 rounded" draggable={false} />
               </div>
               <p className="text-xs text-muted-foreground text-center max-w-xs">
                 {statusMessage ?? "Working on your automation scripts. This may take a moment..."}
@@ -1196,7 +1202,7 @@ export const ChatInterface = () => {
         ) : (
           <Card className="h-full flex items-center justify-center bg-card/30 backdrop-blur-sm border-border/50 border-dashed">
             <div className="text-center text-muted-foreground p-8">
-              <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <img src={logo} alt="Hyprtask" className="w-12 h-12 mx-auto mb-4 opacity-60 rounded-xl" draggable={false} />
               <p className="text-lg font-medium">Generated code will appear here</p>
               <p className="text-sm mt-2">Start by describing your automation workflow</p>
             </div>
