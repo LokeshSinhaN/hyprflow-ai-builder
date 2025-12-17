@@ -655,6 +655,7 @@ export const ChatInterface = () => {
 
       const hasAnyCode = Boolean(pythonScript) || Boolean(playwrightScript);
       const explanation = explanationRaw?.trim() ? sanitizeChatExplanation(explanationRaw) : "";
+      const rcmFact = ((functionResponse.rcm_fact as string | undefined) ?? "").trim();
 
       // Explanation-only responses: show only explanation in the chat stream.
       if (intent === "explain" && !hasAnyCode) {
@@ -739,13 +740,15 @@ export const ChatInterface = () => {
         openCanvas();
       }
 
+      const factLine = rcmFact ? `\n\n*${rcmFact}*` : "";
+
       const assistantArtifactMessage: ChatMessage = {
         id: newId(),
         role: "assistant",
         kind: "artifact",
         intro: explanation
-          ? `${explanation}\n\n### Generated code artifacts`
-          : "### Generated code artifacts",
+          ? `${explanation}\n\n### Generated code artifacts${factLine}`
+          : `### Generated code artifacts${factLine}`,
         artifacts: refs,
       };
 
@@ -1053,6 +1056,9 @@ export const ChatInterface = () => {
                               strong: ({ node, className, ...props }) => (
                                 <strong {...props} className={cn("font-semibold text-white", className)} />
                               ),
+                              em: ({ node, className, ...props }) => (
+                                <em {...props} className={cn("italic text-white/60", className)} />
+                              ),
                               ul: ({ node, className, ...props }) => (
                                 <ul {...props} className={cn("list-disc pl-5 space-y-1", className)} />
                               ),
@@ -1083,6 +1089,9 @@ export const ChatInterface = () => {
                             ),
                             strong: ({ node, className, ...props }) => (
                               <strong {...props} className={cn("font-semibold text-white", className)} />
+                            ),
+                            em: ({ node, className, ...props }) => (
+                              <em {...props} className={cn("italic text-white/60", className)} />
                             ),
                             ul: ({ node, className, ...props }) => (
                               <ul {...props} className={cn("list-disc pl-5 space-y-1", className)} />

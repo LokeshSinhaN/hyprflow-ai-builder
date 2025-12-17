@@ -27,6 +27,28 @@ const sanitizeDomSnippet = (html: string): string => {
 
 type OutputTool = "selenium" | "playwright" | "both";
 
+const RCM_FACTS: string[] = [
+  "RCM fact: Eligibility checks should verify coverage details (active/inactive, plan, copay, deductible) before scheduling or rendering services.",
+  "RCM fact: Clean claims start with accurate demographics + payer/member ID + ICD-10/CPT alignment to reduce denials and rework.",
+  "RCM fact: Denial management is faster when you log payer reason codes (CARC/RARC) and route appeals by denial category.",
+  "RCM fact: A/R follow-up is commonly prioritized by aging buckets (e.g., 0–30, 31–60, 61–90, 90+) and payer mix.",
+  "RCM fact: Payment posting should reconcile ERA/EOB to the claim line level to catch underpayments and incorrect contractual adjustments.",
+  "RCM fact: Prior authorization gaps are a frequent preventable denial driver—track auth status before high-cost services.",
+];
+
+const hashString = (input: string): number => {
+  let h = 0;
+  for (let i = 0; i < input.length; i++) {
+    h = (h * 31 + input.charCodeAt(i)) | 0;
+  }
+  return h;
+};
+
+const pickRcmFact = (seed: string): string => {
+  const idx = Math.abs(hashString(seed || "")) % RCM_FACTS.length;
+  return RCM_FACTS[idx];
+};
+
 type ExplanationMode = "none" | "minimal" | "fix" | "full";
 
 type OutputPlan = {
@@ -869,6 +891,8 @@ ${plan.intent === "explain"
       pythonPlaywrightScript = tryExtractLoosePython(generatedContent);
     }
 
+    const rcm_fact = pickRcmFact(`${message}|${preflight_job_id ?? ""}|${plan.tool}|${plan.intent}`);
+
     // EXPLANATION MODE: never return scripts; return explanation instead
     if (plan.intent === "explain") {
       const explanation = (chatExplanation && chatExplanation.trim()) ? chatExplanation.trim() : "";
@@ -928,6 +952,7 @@ ${plan.intent === "explain"
 
         return new Response(
           JSON.stringify({
+            rcm_fact,
             explanation,
             scripts: {
               python_selenium: pythonSeleniumScript,
@@ -964,6 +989,7 @@ ${plan.intent === "explain"
 
       return new Response(
         JSON.stringify({
+          rcm_fact,
           explanation,
           scripts: {
             python_selenium: plan.tool === "playwright" ? null : cleanedRaw,
@@ -1000,6 +1026,7 @@ ${plan.intent === "explain"
 
     return new Response(
       JSON.stringify({
+        rcm_fact,
         explanation,
         scripts: {
           python_selenium: pythonSeleniumScript,

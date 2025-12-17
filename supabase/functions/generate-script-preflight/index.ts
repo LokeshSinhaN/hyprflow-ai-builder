@@ -33,6 +33,28 @@ const sanitizeDomSnippet = (html: string): string => {
 
 type OutputTool = "selenium" | "playwright" | "both";
 
+const RCM_FACTS: string[] = [
+  "RCM fact: Eligibility checks should confirm payer, member ID, effective dates, and benefits before services are rendered.",
+  "RCM fact: Clean claim rates improve when required fields (subscriber, DOB, NPI, ICD-10, CPT/HCPCS) are validated pre-submit.",
+  "RCM fact: Denials are easier to appeal when you capture CARC/RARC and the exact missing documentation at the time of rejection.",
+  "RCM fact: A/R teams often prioritize follow-up by aging bucket and high-dollar balances to reduce days in A/R.",
+  "RCM fact: Payment posting should reconcile ERA/EOB to line items and flag underpayments vs contracted rates.",
+  "RCM fact: Prior authorization tracking reduces avoidable denials for advanced imaging and specialty drugs.",
+];
+
+const hashString = (input: string): number => {
+  let h = 0;
+  for (let i = 0; i < input.length; i++) {
+    h = (h * 31 + input.charCodeAt(i)) | 0;
+  }
+  return h;
+};
+
+const pickRcmFact = (seed: string): string => {
+  const idx = Math.abs(hashString(seed || "")) % RCM_FACTS.length;
+  return RCM_FACTS[idx];
+};
+
 type ExplanationMode = "none" | "minimal" | "fix" | "full";
 
 type OutputPlan = {
@@ -915,6 +937,8 @@ ${plan.intent === "explain"
 
     const explanation = (chatExplanation && chatExplanation.trim()) ? chatExplanation.trim() : undefined;
 
+    const rcm_fact = pickRcmFact(`${message}|${job_id}|${plan.tool}|${plan.intent}`);
+
     // EXPLANATION MODE: never return scripts; return explanation instead
     if (plan.intent === "explain") {
       return new Response(
@@ -971,6 +995,7 @@ ${plan.intent === "explain"
 
         return new Response(
           JSON.stringify({
+            rcm_fact,
             explanation,
             scripts: {
               python_selenium: pythonSeleniumScript,
@@ -1009,6 +1034,7 @@ ${plan.intent === "explain"
 
       return new Response(
         JSON.stringify({
+          rcm_fact,
           explanation,
           scripts: {
             python_selenium: plan.tool === "playwright" ? null : cleanedRaw,
@@ -1044,6 +1070,7 @@ ${plan.intent === "explain"
 
     return new Response(
       JSON.stringify({
+        rcm_fact,
         explanation,
         scripts: {
           python_selenium: pythonSeleniumScript,
