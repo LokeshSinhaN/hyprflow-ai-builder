@@ -453,12 +453,39 @@ export const ChatInterface = () => {
         throw new Error(functionResponse.error as string);
       }
 
+      const sanitizeChatExplanation = (text: string): string => {
+        // Hard guarantee: never allow fenced code blocks into the chat stream.
+        return text.replace(/```[\s\S]*?```/g, "\n\n(Implementation moved to the Code Canvas.)\n\n").trim();
+      };
+
+      const intent = (functionResponse.intent as string | undefined) ?? undefined;
+      const explanation =
+        (functionResponse.explanation as string | undefined) ??
+        (functionResponse.chat_explanation as string | undefined);
+
       // Functions return { scripts: { python_selenium, python_playwright, ... } } or { script }
       const pythonScript =
         (functionResponse.scripts?.python_selenium ||
           functionResponse.scripts?.python ||
-          functionResponse.script) as string;
+          functionResponse.script ||
+          "") as string;
       const playwrightScript = (functionResponse.scripts?.python_playwright ?? null) as string | null;
+
+      // Explanation-only responses: keep chat stream for explanation and keep canvas closed.
+      if (intent === "explain" || (explanation && explanation.trim().length > 0)) {
+        const content = sanitizeChatExplanation(explanation ?? "") || "No explanation returned.";
+
+        const assistantExplainMessage: ChatMessage = {
+          id: newId(),
+          role: "assistant",
+          kind: "text",
+          content,
+        };
+
+        setMessages((prev) => [...prev, assistantExplainMessage]);
+        await saveMessage("assistant", content);
+        return;
+      }
 
       const scripts = { python: pythonScript, playwright: playwrightScript };
       setBaseScripts(scripts);

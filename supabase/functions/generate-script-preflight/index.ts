@@ -264,9 +264,9 @@ Selenium only: ${plan.seleniumOnly}
 
 - Always output content between the required delimiters.
 - If Intent is "explain":
-  - Do NOT output runnable code.
-  - Put the response as Python comments in the Selenium section (each line starts with "# ").
-  - Leave the Playwright section EMPTY.
+  - Output ONLY a natural-language explanation in the CHAT_EXPLANATION section.
+  - The explanation MUST be structured Markdown (headings, bullet points) and MUST NOT include code fences or runnable scripts.
+  - Leave BOTH script sections EMPTY.
 - If Intent is "code" and Selenium only is true:
   - Output ONLY the Selenium script.
   - Leave the Playwright section EMPTY.
@@ -426,6 +426,10 @@ DO NOT IMPLEMENT (Out-of-Browser Actions):
 ================================================================================
 
 You MUST return your response in this EXACT format with these EXACT delimiters:
+
+=== CHAT_EXPLANATION ===
+[Optional. Structured Markdown explanation only. No code fences. No runnable scripts.]
+=== END_CHAT_EXPLANATION ===
 
 === PYTHON_SELENIUM_SCRIPT ===
 [Your complete Selenium script here - NO markdown code fences, just raw Python code]
@@ -623,14 +627,14 @@ Generate both scripts now following ALL requirements above.`;
 **User Request:** ${message}
 
 ${plan.intent === "explain"
-  ? "Provide an explanation / fix guidance (NO runnable code). Format the entire response as Python comments so it renders nicely in a code viewer."
+  ? "Provide an explanation / fix guidance (NO runnable code). Put it ONLY in the CHAT_EXPLANATION section as structured Markdown (headings + bullet points). Leave BOTH script sections empty."
   : plan.seleniumOnly
     ? "Generate ONE complete, production-ready Python script using Selenium only (do NOT generate Playwright)."
     : "Generate TWO complete, production-ready Python scripts (Selenium and Playwright)."}
 
 CRITICAL REQUIREMENTS CHECKLIST:
 ${plan.intent === "explain"
-  ? "✓ Explain clearly and concretely based on the SOP/DOM/code context above\n✓ If suggesting changes, list them as bullet points in Python comments\n✓ Do NOT include markdown code fences"
+  ? "✓ Explain clearly and concretely based on the SOP/DOM/code context above\n✓ Use structured Markdown (headings + bullet points)\n✓ Do NOT include code fences or runnable scripts"
   : plan.seleniumOnly
     ? "✓ Include create_stealth_driver() function with ALL anti-detection options listed above (Selenium only)"
     : "✓ Include create_stealth_driver() and create_stealth_browser() functions with ALL anti-detection options listed above"}
@@ -655,7 +659,7 @@ ${hasCookiesProfile ? "✓ Scripts MUST load cookies_json dynamically at runtime
 ${contextSection ? "IMPORTANT: Follow the SOP/DOM workflow order exactly. Preserve all URLs, selectors, field names, and button labels from the context." : ""}
 
 ${plan.intent === "explain"
-  ? "Remember: Output ONLY Python-commented text between the === delimiters (no markdown)."
+  ? "Remember: Output ONLY a Markdown explanation in CHAT_EXPLANATION (no code fences, no scripts) and leave both script sections empty."
   : "Remember: Output ONLY raw Python code between the === delimiters. No triple backticks, no markdown formatting."}
 
 ${plan.intent === "explain"
@@ -756,17 +760,26 @@ ${plan.intent === "explain"
       return slice.trim();
     };
 
-    const toPythonComments = (text: string): string => {
+    const stripMarkdownFencesFromText = (text: string | null): string | null => {
+      if (!text) return text;
+      return text.replace(/```[\s\S]*?```/g, "").trim();
+    };
+
+    const stripLeadingCommentMarkers = (text: string): string => {
       return text
         .split("\n")
-        .map((line) => {
-          const trimmed = line.trim();
-          if (!trimmed) return "";
-          if (trimmed.startsWith("#")) return line;
-          return `# ${line}`;
-        })
-        .join("\n");
+        .map((line) => line.replace(/^\s*#\s?/, ""))
+        .join("\n")
+        .trim();
     };
+
+    const chatExplanation = stripMarkdownFencesFromText(
+      extractBetweenMarkers(
+        generatedContent,
+        "=== CHAT_EXPLANATION ===",
+        "=== END_CHAT_EXPLANATION ===",
+      ),
+    );
 
     let pythonSeleniumScript = stripCodeFences(
       extractBetweenMarkers(
@@ -775,10 +788,6 @@ ${plan.intent === "explain"
         "=== END_PYTHON_SELENIUM_SCRIPT ===",
       ),
     );
-
-    if (pythonSeleniumScript && plan.intent === "explain") {
-      pythonSeleniumScript = toPythonComments(pythonSeleniumScript);
-    }
 
     const requirePlaywright = plan.requirePlaywright;
 
@@ -789,6 +798,31 @@ ${plan.intent === "explain"
         "=== END_PYTHON_PLAYWRIGHT_SCRIPT ===",
       ),
     );
+
+    // EXPLANATION MODE: never return scripts; return explanation instead
+    if (plan.intent === "explain") {
+      const fallbackFromSelenium = pythonSeleniumScript ? stripLeadingCommentMarkers(pythonSeleniumScript) : "";
+      const explanation = (chatExplanation && chatExplanation.trim()) ? chatExplanation.trim() : fallbackFromSelenium;
+
+      return new Response(
+        JSON.stringify({
+          explanation,
+          scripts: { python_selenium: "", python_playwright: null, raw: generatedContent },
+          model_used: "gemini-2.5-flash",
+          intent: plan.intent,
+          selenium_only: plan.seleniumOnly,
+          context_used: combinedContext.length,
+          context_source: contextSource,
+          sop_file: sopFileName,
+          retrieval_method: "preflight_dom_long_context",
+          parsing_method: "chat-explanation",
+          anti_captcha_enabled: true,
+          cookies_profile_present: hasCookiesProfile,
+          target_url: targetUrl,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 },
+      );
+    }
 
     if (!requirePlaywright) {
       // Enforce contract: when Selenium-only or explanation mode is active, never return Playwright output.
