@@ -31,10 +31,12 @@ const sanitizeDomSnippet = (html: string): string => {
   return cleaned.trim();
 };
 
+type OutputTool = "selenium" | "playwright" | "both";
+
 type OutputPlan = {
   intent: "code" | "explain";
-  seleniumOnly: boolean;
-  requirePlaywright: boolean;
+  includeExplanation: boolean;
+  tool: OutputTool;
 };
 
 const classifyPrompt = (message: string): OutputPlan => {
@@ -42,6 +44,7 @@ const classifyPrompt = (message: string): OutputPlan => {
 
   const hasSelenium = /\bselenium\b/.test(m);
   const hasPlaywright = /\bplaywright\b/.test(m);
+  const wantsBoth = /\b(both|two scripts|two versions|selenium and playwright|playwright and selenium)\b/.test(m);
 
   const wantsFix = /\b(fix|debug|resolve|repair|correct|update|patch|refactor)\b/.test(m);
   const wantsExplain =
@@ -49,11 +52,21 @@ const classifyPrompt = (message: string): OutputPlan => {
     /\b(tags?)\b/.test(m) ||
     /\b(selectors?|locators?|xpath|css selector)\b/.test(m);
 
-  const intent: OutputPlan["intent"] = wantsExplain && !wantsFix ? "explain" : "code";
-  const seleniumOnly = hasSelenium && !hasPlaywright;
-  const requirePlaywright = intent === "code" && !seleniumOnly;
+  const wantsCode = /\b(generate|write|create|implement|script|code)\b/.test(m);
 
-  return { intent, seleniumOnly, requirePlaywright };
+  const intent: OutputPlan["intent"] = wantsCode || wantsFix ? "code" : wantsExplain ? "explain" : "code";
+  const includeExplanation = wantsExplain;
+
+  let tool: OutputTool = "selenium";
+  if (wantsBoth || (hasSelenium && hasPlaywright)) {
+    tool = "both";
+  } else if (hasPlaywright && !hasSelenium) {
+    tool = "playwright";
+  } else {
+    tool = "selenium";
+  }
+
+  return { intent, includeExplanation, tool };
 };
 
 serve(async (req) => {
@@ -260,23 +273,26 @@ serve(async (req) => {
 OUTPUT MODE OVERRIDE (MUST FOLLOW)
 ================================================================================
 Intent: ${plan.intent}
-Selenium only: ${plan.seleniumOnly}
+Include explanation: ${plan.includeExplanation}
+Tool: ${plan.tool}
 
 - Always output content between the required delimiters.
 - If Intent is "explain":
   - Output ONLY a natural-language explanation in the CHAT_EXPLANATION section.
-  - The explanation MUST be structured Markdown and MUST be glanceable (short sections + lists).
-  - Formatting rules (MANDATORY):
-    - Use ONLY "###" for headings (never "#" or "##").
-    - Use "- " for bullet points.
-    - Use "**bold**" for emphasis.
-  - NEVER include code fences (no triple backticks) or runnable scripts.
   - Leave BOTH script sections EMPTY.
-- If Intent is "code" and Selenium only is true:
-  - Output ONLY the Selenium script.
-  - Leave the Playwright section EMPTY.
-- If Intent is "code" and Selenium only is false:
-  - Output BOTH Selenium and Playwright scripts.
+- If Intent is "code":
+  - If Include explanation is true, also fill CHAT_EXPLANATION (no code).
+  - If Tool is "selenium": output ONLY the Selenium script and leave Playwright EMPTY.
+  - If Tool is "playwright": output ONLY the Playwright script and leave Selenium EMPTY.
+  - If Tool is "both": output BOTH scripts.
+
+CHAT_EXPLANATION RULES (MANDATORY when present):
+- Must be structured Markdown and glanceable (short sections + lists).
+- Formatting rules: use ONLY "###" headings, "- " bullets, and "**bold**" emphasis.
+- NEVER include code fences (no triple backticks) or runnable scripts.
+
+GLOBAL OUTPUT RULE:
+- NEVER output anything outside the required delimiter sections.
 
 COOKIE INJECTION (MANDATORY WHEN COOKIES ARE PROVIDED):
 - You MUST implement an inject_cookies(...) helper that takes raw JSON cookie data at runtime (no hard-coded cookie values) and injects it into the browser context reliably.
@@ -632,17 +648,25 @@ Generate both scripts now following ALL requirements above.`;
 **User Request:** ${message}
 
 ${plan.intent === "explain"
-  ? "Provide an explanation / fix guidance (NO runnable code). Put it ONLY in the CHAT_EXPLANATION section as structured Markdown. Formatting rules: use ONLY '###' headings (never '#' or '##'), use '- ' bullets, and use '**bold**' emphasis. Keep it glanceable (short sections + lists). Leave BOTH script sections empty."
-  : plan.seleniumOnly
-    ? "Generate ONE complete, production-ready Python script using Selenium only (do NOT generate Playwright)."
-    : "Generate TWO complete, production-ready Python scripts (Selenium and Playwright)."}
+  ? "Provide ONLY an explanation (NO runnable code). Put it ONLY in the CHAT_EXPLANATION section and leave BOTH script sections empty."
+  : plan.tool === "both"
+    ? "Generate TWO complete scripts (Selenium and Playwright)."
+    : plan.tool === "playwright"
+      ? "Generate ONE complete script using Playwright only (leave Selenium empty)."
+      : "Generate ONE complete script using Selenium only (leave Playwright empty)."}
+
+${plan.intent === "code" && plan.includeExplanation
+  ? "Also include a structured Markdown explanation in CHAT_EXPLANATION (no code)."
+  : ""}
 
 CRITICAL REQUIREMENTS CHECKLIST:
 ${plan.intent === "explain"
   ? "✓ Explain clearly and concretely based on the SOP/DOM/code context above\n✓ Use structured Markdown with ONLY '###' headings\n✓ Use '- ' bullets and '**bold**' emphasis\n✓ Keep it glanceable (no walls of text)\n✓ Do NOT include code fences or runnable scripts"
-  : plan.seleniumOnly
-    ? "✓ Include create_stealth_driver() function with ALL anti-detection options listed above (Selenium only)"
-    : "✓ Include create_stealth_driver() and create_stealth_browser() functions with ALL anti-detection options listed above"}
+  : plan.tool === "both"
+    ? "✓ Include create_stealth_driver() and create_stealth_browser() functions with ALL anti-detection options listed above"
+    : plan.tool === "playwright"
+      ? "✓ Include create_stealth_browser() function with ALL anti-detection options listed above (Playwright only)"
+      : "✓ Include create_stealth_driver() function with ALL anti-detection options listed above (Selenium only)"}
 ✓ For each critical element (username, password, cookie banner button, navigation button, etc.), use a defensive locator pattern:
   - Primary: WebDriverWait with the exact id from the DOM (By.ID is mandatory when id exists).
   - Secondary: in except block, WebDriverWait using name or data-testid from the DOM.
@@ -665,7 +689,7 @@ ${contextSection ? "IMPORTANT: Follow the SOP/DOM workflow order exactly. Preser
 
 ${plan.intent === "explain"
   ? "Remember: Output ONLY a Markdown explanation in CHAT_EXPLANATION that follows the formatting rules (### headings, - bullets, **bold**). No code fences, no scripts; leave both script sections empty."
-  : "Remember: Output ONLY raw Python code between the === delimiters. No triple backticks, no markdown formatting."}
+  : "Remember: Output ONLY content inside delimiter sections. Do NOT append anything after END markers. Do NOT repeat the user request. Do NOT include markdown code fences."}
 
 ${plan.intent === "explain"
   ? "Answer now."
@@ -786,6 +810,28 @@ ${plan.intent === "explain"
       ),
     );
 
+    const stripDelimitersAndExplanation = (source: string): string => {
+      return source
+        .replace(/=== CHAT_EXPLANATION ===[\s\S]*?=== END_CHAT_EXPLANATION ===/g, "")
+        .replace(/=== PYTHON_SELENIUM_SCRIPT ===/g, "")
+        .replace(/=== END_PYTHON_SELENIUM_SCRIPT ===/g, "")
+        .replace(/=== PYTHON_PLAYWRIGHT_SCRIPT ===/g, "")
+        .replace(/=== END_PYTHON_PLAYWRIGHT_SCRIPT ===/g, "")
+        .trim();
+    };
+
+    const tryExtractLoosePython = (source: string): string | null => {
+      const cleaned = stripDelimitersAndExplanation(source);
+      const idx = cleaned.search(/(^|\n)\s*(from\s+\S+\s+import\s+|import\s+|def\s+|class\s+)/m);
+      if (idx === -1) return null;
+      const candidate = cleaned.slice(idx).trim();
+      const stop = candidate.search(/(^|\n)\s*(###\s+|Explanation\b)/m);
+      return (stop === -1 ? candidate : candidate.slice(0, stop)).trim();
+    };
+
+    const requirePlaywright = plan.tool === "both";
+    const requireSelenium = plan.tool === "selenium" || plan.tool === "both";
+
     let pythonSeleniumScript = stripCodeFences(
       extractBetweenMarkers(
         generatedContent,
@@ -793,8 +839,6 @@ ${plan.intent === "explain"
         "=== END_PYTHON_SELENIUM_SCRIPT ===",
       ),
     );
-
-    const requirePlaywright = plan.requirePlaywright;
 
     let pythonPlaywrightScript = stripCodeFences(
       extractBetweenMarkers(
@@ -804,18 +848,27 @@ ${plan.intent === "explain"
       ),
     );
 
+    // If scripts are missing but the model appended code outside markers, attempt a loose extraction.
+    if ((!pythonSeleniumScript || pythonSeleniumScript.trim().length === 0) && requireSelenium) {
+      pythonSeleniumScript = tryExtractLoosePython(generatedContent);
+    }
+
+    if ((!pythonPlaywrightScript || pythonPlaywrightScript.trim().length === 0) && plan.tool === "playwright") {
+      pythonPlaywrightScript = tryExtractLoosePython(generatedContent);
+    }
+
+    const explanation = (chatExplanation && chatExplanation.trim()) ? chatExplanation.trim() : undefined;
+
     // EXPLANATION MODE: never return scripts; return explanation instead
     if (plan.intent === "explain") {
-      const fallbackFromSelenium = pythonSeleniumScript ? stripLeadingCommentMarkers(pythonSeleniumScript) : "";
-      const explanation = (chatExplanation && chatExplanation.trim()) ? chatExplanation.trim() : fallbackFromSelenium;
-
       return new Response(
         JSON.stringify({
-          explanation,
+          explanation: explanation ?? "",
           scripts: { python_selenium: "", python_playwright: null, raw: generatedContent },
           model_used: "gemini-2.5-flash",
           intent: plan.intent,
-          selenium_only: plan.seleniumOnly,
+          tool: plan.tool,
+          include_explanation: plan.includeExplanation,
           context_used: combinedContext.length,
           context_source: contextSource,
           sop_file: sopFileName,
@@ -829,44 +882,56 @@ ${plan.intent === "explain"
       );
     }
 
+    // Enforce tool contract
     if (!requirePlaywright) {
-      // Enforce contract: when Selenium-only or explanation mode is active, never return Playwright output.
       pythonPlaywrightScript = null;
     }
 
-    if (!pythonSeleniumScript || (requirePlaywright && !pythonPlaywrightScript)) {
+    if (!requireSelenium) {
+      pythonSeleniumScript = null;
+    }
+
+    const missingRequiredScript =
+      (requireSelenium && (!pythonSeleniumScript || pythonSeleniumScript.trim().length === 0)) ||
+      (plan.tool === "playwright" && (!pythonPlaywrightScript || pythonPlaywrightScript.trim().length === 0)) ||
+      (requirePlaywright && (!pythonPlaywrightScript || pythonPlaywrightScript.trim().length === 0));
+
+    if (missingRequiredScript) {
       console.warn("⚠️  [Preflight] Primary parsing failed, attempting fallback...");
 
       const allPythonBlocks = generatedContent.match(/```(?:python|py)?[\s\S]*?```/gi);
 
-      if (allPythonBlocks && (requirePlaywright ? allPythonBlocks.length >= 2 : allPythonBlocks.length >= 1)) {
-        console.log(`🔄 [Preflight] Found ${allPythonBlocks.length} code blocks, using ${requirePlaywright ? "first two" : "first"}`);
-
-        pythonSeleniumScript = stripCodeFences(allPythonBlocks[0]);
-        pythonPlaywrightScript = requirePlaywright ? stripCodeFences(allPythonBlocks[1]) : null;
+      if (allPythonBlocks && allPythonBlocks.length >= 1) {
+        if (plan.tool === "both" && allPythonBlocks.length >= 2) {
+          pythonSeleniumScript = stripCodeFences(allPythonBlocks[0]);
+          pythonPlaywrightScript = stripCodeFences(allPythonBlocks[1]);
+        } else if (plan.tool === "playwright") {
+          pythonSeleniumScript = null;
+          pythonPlaywrightScript = stripCodeFences(allPythonBlocks[0]);
+        } else {
+          pythonSeleniumScript = stripCodeFences(allPythonBlocks[0]);
+          pythonPlaywrightScript = null;
+        }
 
         return new Response(
           JSON.stringify({
+            explanation,
             scripts: {
               python_selenium: pythonSeleniumScript,
               python_playwright: pythonPlaywrightScript,
               raw: generatedContent,
             },
             model_used: "gemini-2.5-flash",
+            intent: plan.intent,
+            tool: plan.tool,
+            include_explanation: plan.includeExplanation,
             context_used: combinedContext.length,
             context_source: contextSource,
             sop_file: sopFileName,
             retrieval_method: "preflight_dom_long_context",
-            parsing_method: requirePlaywright ? "fallback-code-fences" : "fallback-code-fences-selenium-only",
+            parsing_method: "fallback-code-fences",
             anti_captcha_enabled: true,
-            features: [
-              "anti-bot-chrome-options",
-              "human-like-timing",
-              "explicit-waits",
-              "comprehensive-error-handling",
-              "complete-implementation",
-              "markdown-stripped",
-            ],
+            cookies_profile_present: hasCookiesProfile,
             target_url: targetUrl,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 },
@@ -878,6 +943,8 @@ ${plan.intent === "explain"
       const cleanedRaw =
         stripCodeFences(
           generatedContent
+            .replace(/===\s*CHAT_EXPLANATION\s*===/gi, "")
+            .replace(/===\s*END_CHAT_EXPLANATION\s*===/gi, "")
             .replace(/===\s*PYTHON_SELENIUM_SCRIPT\s*===/gi, "")
             .replace(/===\s*END_PYTHON_SELENIUM_SCRIPT\s*===/gi, "")
             .replace(/===\s*PYTHON_PLAYWRIGHT_SCRIPT\s*===/gi, "")
@@ -886,19 +953,24 @@ ${plan.intent === "explain"
 
       return new Response(
         JSON.stringify({
+          explanation,
           scripts: {
-            python_selenium: cleanedRaw,
-            python_playwright: null,
+            python_selenium: plan.tool === "playwright" ? null : cleanedRaw,
+            python_playwright: plan.tool === "playwright" ? cleanedRaw : null,
             raw: generatedContent,
           },
           model_used: "gemini-2.5-flash",
+          intent: plan.intent,
+          tool: plan.tool,
+          include_explanation: plan.includeExplanation,
           context_used: combinedContext.length,
           context_source: contextSource,
           sop_file: sopFileName,
           retrieval_method: "preflight_dom_long_context",
           parsing_method: "raw-cleaned",
-          warning: "Could not separate scripts - returning cleaned content in Selenium field",
+          warning: "Could not reliably separate scripts; returning cleaned content in the requested tool field",
           anti_captcha_enabled: true,
+          cookies_profile_present: hasCookiesProfile,
           target_url: targetUrl,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 },
@@ -907,14 +979,16 @@ ${plan.intent === "explain"
 
     console.log("✅ [Preflight] Successfully parsed output", {
       intent: plan.intent,
-      seleniumOnly: plan.seleniumOnly,
-      hasPlaywright: !!pythonPlaywrightScript,
+      tool: plan.tool,
+      includeExplanation: plan.includeExplanation,
+      hasExplanation: !!explanation,
       seleniumLength: pythonSeleniumScript?.length || 0,
       playwrightLength: pythonPlaywrightScript?.length || 0,
     });
 
     return new Response(
       JSON.stringify({
+        explanation,
         scripts: {
           python_selenium: pythonSeleniumScript,
           python_playwright: pythonPlaywrightScript,
@@ -922,12 +996,13 @@ ${plan.intent === "explain"
         },
         model_used: "gemini-2.5-flash",
         intent: plan.intent,
-        selenium_only: plan.seleniumOnly,
+        tool: plan.tool,
+        include_explanation: plan.includeExplanation,
         context_used: combinedContext.length,
         context_source: contextSource,
         sop_file: sopFileName,
         retrieval_method: "preflight_dom_long_context",
-        parsing_method: plan.requirePlaywright ? "primary-markers" : "primary-markers-selenium-only",
+        parsing_method: "primary-markers",
         anti_captcha_enabled: true,
         cookies_profile_present: hasCookiesProfile,
         features: [

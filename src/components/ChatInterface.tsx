@@ -461,6 +461,15 @@ export const ChatInterface = () => {
           "\n\n(Implementation moved to the Code Canvas.)\n\n",
         );
 
+        // Never allow delimiter markers to appear in the chat stream.
+        cleaned = cleaned
+          .replace(/^\s*===\s*CHAT_EXPLANATION\s*===\s*$/gim, "")
+          .replace(/^\s*===\s*END_CHAT_EXPLANATION\s*===\s*$/gim, "")
+          .replace(/^\s*===\s*PYTHON_SELENIUM_SCRIPT\s*===\s*$/gim, "")
+          .replace(/^\s*===\s*END_PYTHON_SELENIUM_SCRIPT\s*===\s*$/gim, "")
+          .replace(/^\s*===\s*PYTHON_PLAYWRIGHT_SCRIPT\s*===\s*$/gim, "")
+          .replace(/^\s*===\s*END_PYTHON_PLAYWRIGHT_SCRIPT\s*===\s*$/gim, "");
+
         // Normalize headings: allow only '### ' headings in chat stream.
         cleaned = cleaned
           .split("\n")
@@ -485,35 +494,51 @@ export const ChatInterface = () => {
           .map((line) => line.replace(/^\s*•\s+/, "- "))
           .join("\n");
 
+        // Collapse excessive blank lines.
+        cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+
         return cleaned.trim();
       };
 
       const intent = (functionResponse.intent as string | undefined) ?? undefined;
-      const explanation =
+      const explanationRaw =
         (functionResponse.explanation as string | undefined) ??
         (functionResponse.chat_explanation as string | undefined);
 
       // Functions return { scripts: { python_selenium, python_playwright, ... } } or { script }
-      const pythonScript =
+      const pythonScriptRaw =
         (functionResponse.scripts?.python_selenium ||
           functionResponse.scripts?.python ||
           functionResponse.script ||
           "") as string;
-      const playwrightScript = (functionResponse.scripts?.python_playwright ?? null) as string | null;
+      const playwrightScriptRaw = (functionResponse.scripts?.python_playwright ?? null) as string | null;
 
-      // Explanation-only responses: keep chat stream for explanation and keep canvas closed.
-      if (intent === "explain" || (explanation && explanation.trim().length > 0)) {
-        const content = sanitizeChatExplanation(explanation ?? "") || "No explanation returned.";
+      const pythonScript = pythonScriptRaw?.trim() ? pythonScriptRaw : "";
+      const playwrightScript = playwrightScriptRaw?.trim() ? playwrightScriptRaw : null;
 
+      const hasAnyCode = Boolean(pythonScript) || Boolean(playwrightScript);
+      const explanation = explanationRaw?.trim() ? sanitizeChatExplanation(explanationRaw) : "";
+
+      // If we have an explanation, always show it in the chat stream (never as an artifact).
+      if (explanation) {
         const assistantExplainMessage: ChatMessage = {
           id: newId(),
           role: "assistant",
           kind: "text",
-          content,
+          content: explanation,
         };
-
         setMessages((prev) => [...prev, assistantExplainMessage]);
-        await saveMessage("assistant", content);
+        await saveMessage("assistant", explanation);
+      }
+
+      // Explanation-only responses: no artifacts.
+      if (intent === "explain" && !hasAnyCode) {
+        return;
+      }
+
+      // If backend returned no code at all, stop here (avoid opening empty artifacts).
+      if (!hasAnyCode) {
+        toast.error("No code was generated. Please rephrase your request or explicitly ask for a Selenium script.");
         return;
       }
 
@@ -528,11 +553,13 @@ export const ChatInterface = () => {
       setArtifactGeneration(generationNumber);
       const versionLabel = `v${generationNumber}`;
 
-      const seleniumArtifact: Artifact = {
-        content: pythonScript,
-        language: "python",
-        version_id: newId(),
-      };
+      const seleniumArtifact: Artifact | null = pythonScript
+        ? {
+            content: pythonScript,
+            language: "python",
+            version_id: newId(),
+          }
+        : null;
 
       const maybePlaywrightArtifact: Artifact | null = playwrightScript
         ? {
@@ -542,9 +569,11 @@ export const ChatInterface = () => {
           }
         : null;
 
-      const refs: ArtifactRef[] = [
-        { title: "Python (Selenium)", version_id: seleniumArtifact.version_id, version_label: versionLabel },
-      ];
+      const refs: ArtifactRef[] = [];
+
+      if (seleniumArtifact) {
+        refs.push({ title: "Python (Selenium)", version_id: seleniumArtifact.version_id, version_label: versionLabel });
+      }
 
       if (maybePlaywrightArtifact) {
         refs.push({
@@ -554,19 +583,28 @@ export const ChatInterface = () => {
         });
       }
 
-      setArtifacts((prev) => [...prev, seleniumArtifact, ...(maybePlaywrightArtifact ? [maybePlaywrightArtifact] : [])]);
+      setArtifacts((prev) => [
+        ...prev,
+        ...(seleniumArtifact ? [seleniumArtifact] : []),
+        ...(maybePlaywrightArtifact ? [maybePlaywrightArtifact] : []),
+      ]);
       setArtifactMeta((prev) => {
         const next = { ...prev };
-        next[seleniumArtifact.version_id] = { title: "Python (Selenium)", versionLabel };
+        if (seleniumArtifact) {
+          next[seleniumArtifact.version_id] = { title: "Python (Selenium)", versionLabel };
+        }
         if (maybePlaywrightArtifact) {
           next[maybePlaywrightArtifact.version_id] = { title: "Python (Playwright)", versionLabel };
         }
         return next;
       });
 
-      // Auto-open newest artifact
-      setActiveArtifactVersionId(seleniumArtifact.version_id);
-      openCanvas();
+      // Auto-open newest artifact (prefer Selenium, fallback to Playwright)
+      const versionToOpen = seleniumArtifact?.version_id ?? maybePlaywrightArtifact?.version_id ?? null;
+      if (versionToOpen) {
+        setActiveArtifactVersionId(versionToOpen);
+        openCanvas();
+      }
 
       const assistantArtifactMessage: ChatMessage = {
         id: newId(),
@@ -579,7 +617,7 @@ export const ChatInterface = () => {
       setMessages((prev) => [...prev, assistantArtifactMessage]);
 
       // Save assistant message with primary Python code (no-op in dev mode)
-      await saveMessage("assistant", assistantArtifactMessage.intro, pythonScript);
+      await saveMessage("assistant", assistantArtifactMessage.intro, pythonScript || (playwrightScript ?? undefined));
 
       // Clear uploaded document after successful generation
       if (uploadedDocument) {
