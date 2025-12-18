@@ -1205,7 +1205,7 @@ export const ChatInterface = () => {
                 </h1>
               </div>
               <p className="text-lg md:text-4xl text-white/70 font-medium ml-1">
-                What are we building today?
+                What are we automating today?
               </p>
             </div>
           )}
