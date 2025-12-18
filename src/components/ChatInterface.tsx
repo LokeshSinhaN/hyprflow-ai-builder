@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
-import { Upload, Camera, Send, History } from "lucide-react";
+import { Upload, Camera, Send, History, FileText } from "lucide-react";
 import { toast } from "sonner";
 import logo from "@/assets/logo.png";
 import { supabase } from "@/integrations/supabase/client";
@@ -182,6 +182,8 @@ type ChatMessage =
     role: "user" | "assistant";
     kind: "text";
     content: string;
+    // For user prompts, capture which SOP/PDF was "active" at send time so history renders correctly.
+    attachmentTitle?: string;
   }
   | {
     id: string;
@@ -504,9 +506,16 @@ export const ChatInterface = () => {
     }
 
     const userMessage = message;
+    const activeAttachmentTitle = sopDocuments[0]?.title;
     const newMessages: ChatMessage[] = [
       ...messages,
-      { id: newId(), role: "user", kind: "text", content: userMessage },
+      {
+        id: newId(),
+        role: "user",
+        kind: "text",
+        content: userMessage,
+        attachmentTitle: activeAttachmentTitle,
+      },
     ];
     setMessages(newMessages);
     setMessage("");
@@ -1201,7 +1210,15 @@ export const ChatInterface = () => {
                           </ReactMarkdown>
                         </div>
                       ) : (
-                        <p className={cn("text-sm text-white", "leading-relaxed")}>{msg.content}</p>
+                        <div className="flex flex-col">
+                          {msg.attachmentTitle && (
+                            <div className="inline-flex w-fit max-w-full items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-white/60 mb-2">
+                              <FileText className="w-3 h-3 shrink-0" />
+                              <span className="truncate max-w-[260px]">{msg.attachmentTitle}</span>
+                            </div>
+                          )}
+                          <p className={cn("text-sm text-white", "leading-relaxed")}>{msg.content}</p>
+                        </div>
                       )
                     ) : (
                       <div>
