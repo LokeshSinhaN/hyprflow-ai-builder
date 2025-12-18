@@ -204,7 +204,11 @@ export const ChatInterface = () => {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [artifactMeta, setArtifactMeta] = useState<Record<string, { title: string; versionLabel: string }>>({});
   const [activeArtifactVersionId, setActiveArtifactVersionId] = useState<string | null>(null);
-  const [artifactGeneration, setArtifactGeneration] = useState(0);
+  // Track versions per SOP context so a newly uploaded SOP starts back at v1.
+  const [artifactGenerationByContext, setArtifactGenerationByContext] = useState<Record<string, number>>({});
+  // Track the most recent human-friendly hint per SOP context so follow-up prompts like
+  // "update the above code" can inherit the prior intent instead of producing generic titles.
+  const [lastArtifactHintByContext, setLastArtifactHintByContext] = useState<Record<string, string>>({});
 
   const [showHistory, setShowHistory] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>("local-conversation");
@@ -347,7 +351,8 @@ export const ChatInterface = () => {
     setArtifacts([]);
     setArtifactMeta({});
     setActiveArtifactVersionId(null);
-    setArtifactGeneration(0);
+    setArtifactGenerationByContext({});
+    setLastArtifactHintByContext({});
 
     setShowConfigForm(false);
     setConfigEntries([]);
@@ -688,10 +693,122 @@ export const ChatInterface = () => {
       setShowConfigForm(false);
       setConfigEntries([]);
 
+      const buildArtifactHint = (
+        prompt: string,
+        opts: { sopTitle?: string; fallbackHint?: string },
+      ): string => {
+        const STOP = new Set([
+          "the",
+          "a",
+          "an",
+          "and",
+          "or",
+          "to",
+          "of",
+          "for",
+          "with",
+          "in",
+          "on",
+          "at",
+          "from",
+          "by",
+          "based",
+          "upload",
+          "uploaded",
+          "attach",
+          "attached",
+          "sop",
+          "pdf",
+          "file",
+          "script",
+          "automation",
+          "generate",
+          "generated",
+          "create",
+          "created",
+          "write",
+          "build",
+          "please",
+          "python",
+          "selenium",
+          "playwright",
+          "dom",
+          "preflight",
+          "target",
+          "targets",
+          "url",
+          "urls",
+          "above",
+          "previous",
+          "earlier",
+          "this",
+          "same",
+          "again",
+          "code",
+        ]);
+
+        const raw = (prompt || "").trim();
+        const isChange = /\b(fix|update|refactor|change|improve|adjust|modify|debug)\b/i.test(raw);
+
+        // If user provided a quoted phrase, it's the most explicit label.
+        const quoted = raw.match(/["“]([^"”]{3,80})["”]/)?.[1]?.trim();
+
+        const cleaned = raw
+          .replace(/https?:\/\/\S+/gi, " ")
+          .replace(/\b\S+\.pdf\b/gi, " ")
+          .replace(/[\r\n]+/g, " ")
+          .replace(/[^a-zA-Z0-9\s]/g, " ")
+          .toLowerCase()
+          .trim();
+
+        const tokens = cleaned
+          .split(/\s+/)
+          .map((w) => w.trim())
+          .filter((w) => w.length >= 3)
+          .filter((w) => !STOP.has(w));
+
+        // If the prompt is a generic "update the above" style request, inherit context.
+        const genericChange = isChange && tokens.length <= 2;
+
+        const cap = (w: string) => (w ? w[0].toUpperCase() + w.slice(1) : "");
+        const sopBase = (opts.sopTitle || "").replace(/\.pdf\b/gi, "").trim();
+
+        const baseHint =
+          opts.fallbackHint?.trim() ||
+          (sopBase ? sopBase.split(/\s+/).slice(0, 6).join(" ").trim() : "");
+
+        let hint = "";
+
+        if (quoted) {
+          hint = quoted;
+        } else if (!genericChange && tokens.length) {
+          // Keep more signal words than before; we still cap for UI readability.
+          hint = tokens.slice(0, 7).map(cap).join(" ").trim();
+        } else {
+          hint = baseHint;
+        }
+
+        if (!hint) hint = "Draft";
+
+        // Apply change prefix only when it adds information.
+        if (isChange && hint && !/^update\b/i.test(hint)) {
+          hint = `Update ${hint}`;
+        }
+
+        if (hint.length > 60) hint = hint.slice(0, 60).trimEnd() + "…";
+        return hint;
+      };
+
       // Create Claude-style artifacts (do not render code inline; attach cards and auto-open)
-      const generationNumber = artifactGeneration + 1;
-      setArtifactGeneration(generationNumber);
-      const versionLabel = `v${generationNumber}`;
+      const currentSop = sopDocuments.find((d) => d.status === "indexed" && d.content);
+      const contextKey = currentSop?.id ?? "no-sop";
+      const nextGeneration = (artifactGenerationByContext[contextKey] ?? 0) + 1;
+      setArtifactGenerationByContext((prev) => ({ ...prev, [contextKey]: nextGeneration }));
+      const versionLabel = `v${nextGeneration}`;
+
+      const fallbackHint = lastArtifactHintByContext[contextKey] || undefined;
+      const artifactHint = buildArtifactHint(userMessage, { sopTitle: currentSop?.title, fallbackHint });
+      setLastArtifactHintByContext((prev) => ({ ...prev, [contextKey]: artifactHint }));
 
       const seleniumArtifact: Artifact | null = pythonScript
         ? {
@@ -712,12 +829,16 @@ export const ChatInterface = () => {
       const refs: ArtifactRef[] = [];
 
       if (seleniumArtifact) {
-        refs.push({ title: "Python (Selenium)", version_id: seleniumArtifact.version_id, version_label: versionLabel });
+        refs.push({
+          title: `Python (Selenium) - ${artifactHint}`,
+          version_id: seleniumArtifact.version_id,
+          version_label: versionLabel,
+        });
       }
 
       if (maybePlaywrightArtifact) {
         refs.push({
-          title: "Python (Playwright)",
+          title: `Python (Playwright) - ${artifactHint}`,
           version_id: maybePlaywrightArtifact.version_id,
           version_label: versionLabel,
         });
@@ -731,10 +852,10 @@ export const ChatInterface = () => {
       setArtifactMeta((prev) => {
         const next = { ...prev };
         if (seleniumArtifact) {
-          next[seleniumArtifact.version_id] = { title: "Python (Selenium)", versionLabel };
+          next[seleniumArtifact.version_id] = { title: `Python (Selenium) - ${artifactHint}`, versionLabel };
         }
         if (maybePlaywrightArtifact) {
-          next[maybePlaywrightArtifact.version_id] = { title: "Python (Playwright)", versionLabel };
+          next[maybePlaywrightArtifact.version_id] = { title: `Python (Playwright) - ${artifactHint}`, versionLabel };
         }
         return next;
       });
