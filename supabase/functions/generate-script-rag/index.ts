@@ -58,6 +58,7 @@ type OutputPlan = {
   // Keep for backwards compatibility in logs/metadata.
   includeExplanation: boolean;
   identityQuestion: boolean;
+  greeting: boolean;
 };
 
 const classifyPrompt = (message: string): OutputPlan => {
@@ -68,6 +69,11 @@ const classifyPrompt = (message: string): OutputPlan => {
   const wantsBoth = /\b(both|two scripts|two versions|selenium and playwright|playwright and selenium)\b/.test(m);
 
   const wantsFix = /\b(fix|debug|resolve|repair|correct|update|patch|refactor)\b/.test(m);
+
+  const greetingMessage =
+    /^\s*(hi|hello|hey|hiya|yo|good\s+(morning|afternoon|evening)|how\s+are\s+you|how\'s\s+it\s+going|how\s+is\s+it\s+going|what\'s\s+up)(\b|[!?.,])/.test(
+      m,
+    );
 
   const identityQuestion =
     /\b(who\s+are\s+you|what\s+are\s+you|what\s+do\s+you\s+do|what\s+is\s+your\s+role|your\s+role|who\s+is\s+hyprtask|what\s+is\s+hyprtask)\b/.test(
@@ -82,6 +88,7 @@ const classifyPrompt = (message: string): OutputPlan => {
     /\b(explain|explanation|how does|how do|walk me through|what does|describe|breakdown|step[- ]by[- ]step)\b/.test(m) ||
     /\b(tags?)\b/.test(m) ||
     /\b(selectors?|locators?|xpath|css selector)\b/.test(m) ||
+    greetingMessage ||
     identityQuestion ||
     isQuestionStarter ||
     hasAnalysisKeywords;
@@ -145,12 +152,30 @@ const classifyPrompt = (message: string): OutputPlan => {
 
   const includeExplanation = explanationMode !== "none";
 
-  // Identity/role questions must never generate scripts.
-  if (identityQuestion) {
-    return { intent: "explain", tool: "selenium", explanationMode: "full", includeExplanation: true, identityQuestion };
+  // Greetings and identity/role questions must never generate scripts.
+  if (greetingMessage) {
+    return {
+      intent: "explain",
+      tool: "selenium",
+      explanationMode: "minimal",
+      includeExplanation: true,
+      identityQuestion: false,
+      greeting: true,
+    };
   }
 
-  return { intent, tool, explanationMode, includeExplanation, identityQuestion };
+  if (identityQuestion) {
+    return {
+      intent: "explain",
+      tool: "selenium",
+      explanationMode: "minimal",
+      includeExplanation: true,
+      identityQuestion: true,
+      greeting: false,
+    };
+  }
+
+  return { intent, tool, explanationMode, includeExplanation, identityQuestion, greeting: false };
 };
 
 serve(async (req) => {
@@ -200,7 +225,15 @@ serve(async (req) => {
 
       // SOP-less conversation should be allowed for explanations and follow-up questions about prior code.
       if (plan.intent === "explain" || hasPreviousScripts) {
-        sopContext = "User is asking a general question or referring to previously generated code.";
+        if (plan.greeting) {
+          sopContext =
+            "User is greeting you. Respond warmly and briefly as their Digital Employee colleague. Ask what they want to build today, and invite them to upload an SOP or share workflow steps + target URLs if they want a production-ready automation script.";
+        } else if (plan.identityQuestion) {
+          sopContext =
+            "User is asking about your identity/role. Respond professionally and briefly as their Digital Employee colleague. Then ask whether they want to upload an SOP or share workflow steps + target URLs so you can generate a production-ready automation script.";
+        } else {
+          sopContext = "User is asking a general question or referring to previously generated code.";
+        }
         contextSource = "none";
         sopFileName = "";
       } else {
@@ -351,12 +384,19 @@ Intent: ${plan.intent}
 Tool: ${plan.tool}
 Explanation mode: ${plan.explanationMode}
 Identity question: ${plan.identityQuestion}
+Greeting: ${plan.greeting}
 
 - Always output content between the required delimiters.
 - If Intent is "explain":
-  - Output ONLY a natural-language explanation in the CHAT_EXPLANATION section.
+  - Output ONLY a natural-language response in the CHAT_EXPLANATION section.
   - Leave BOTH script sections EMPTY.
-  - If Identity question is true: answer the user's identity/role question in CHAT_EXPLANATION and leave BOTH scripts EMPTY.
+  - If Greeting is true:
+    - DO NOT use headers (no "###").
+    - DO NOT use bullet points.
+    - Write 1–3 short, warm sentences (e.g., "Hello HyprDev! Ready to build something great today? Share your SOP or workflow + target URLs and I’ll handle the code.").
+  - If Identity question is true:
+    - Keep it short and professional.
+    - Avoid headers and bullet points unless the user explicitly asked for a structured summary.
 - If Intent is "code":
   - Follow Explanation mode:
     - minimal: include ONLY "### Automation overview" and "### Limitations" in CHAT_EXPLANATION.
@@ -368,9 +408,9 @@ Identity question: ${plan.identityQuestion}
     - both: output BOTH scripts.
 
 CHAT_EXPLANATION RULES (MANDATORY when present):
-- Must be structured Markdown and glanceable (short sections + lists).
-- Formatting rules: use ONLY "###" headings, "- " bullets, and "**bold**" emphasis.
 - NEVER include code fences (no triple backticks) or runnable scripts.
+- If Greeting is true: use plain text only (no headers, no bullet points).
+- Otherwise: use structured Markdown and keep it glanceable.
 
 GLOBAL OUTPUT RULE:
 - NEVER output anything outside the required delimiter sections.
@@ -380,8 +420,9 @@ COOKIE INJECTION (MANDATORY WHEN COOKIES ARE PROVIDED):
 `;
 
   // ENHANCED SYSTEM PROMPT WITH ALL ANTI-CAPTCHA INSTRUCTIONS
-  const systemPrompt = `You are HyprTask, an intelligent Digital Employee. Your role is to create robust browser automation scripts by analyzing Standard Operating Procedures (SOPs).
+  const systemPrompt = `You are HyprTask, a helpful and professional Digital Employee colleague. Your goal is to be a partner in building robust automation.
 When asked about your identity or role, respond professionally: 'I am acting as your Digital Employee by creating automation scripts based on your SOPs.'
+When the user greets you, respond warmly and briefly in a friendly tone, then ask what they want to build and whether they want to upload an SOP (or share workflow steps + target URLs) so you can generate production-ready automation.
 
 You are an expert web automation engineer specializing in production-ready, CAPTCHA-RESISTANT browser automation.
 

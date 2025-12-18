@@ -438,6 +438,12 @@ export const ChatInterface = () => {
     const classifyUiIntent = (msg: string): "code" | "explain" => {
       const m = (msg || "").toLowerCase();
 
+      const greeting =
+        /^\s*(hi|hello|hey|hiya|yo|good\s+(morning|afternoon|evening)|how\s+are\s+you|how\'s\s+it\s+going|how\s+is\s+it\s+going|what\'s\s+up)(\b|[!?.,])/.test(
+          m,
+        );
+      if (greeting) return "explain";
+
       const identityQuestion =
         /\b(who\s+are\s+you|what\s+are\s+you|what\s+do\s+you\s+do|what\s+is\s+your\s+role|your\s+role|who\s+is\s+hyprtask|what\s+is\s+hyprtask)\b/.test(
           m,
