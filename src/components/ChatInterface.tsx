@@ -178,18 +178,18 @@ const applyConfigEntriesToCode = (code: string, entries: ScriptConfigEntry[]): s
 
 type ChatMessage =
   | {
-      id: string;
-      role: "user" | "assistant";
-      kind: "text";
-      content: string;
-    }
+    id: string;
+    role: "user" | "assistant";
+    kind: "text";
+    content: string;
+  }
   | {
-      id: string;
-      role: "assistant";
-      kind: "artifact";
-      intro: string;
-      artifacts: ArtifactRef[];
-    };
+    id: string;
+    role: "assistant";
+    kind: "artifact";
+    intro: string;
+    artifacts: ArtifactRef[];
+  };
 
 export const ChatInterface = () => {
   const { isCanvasOpen, openCanvas, closeCanvas } = useCanvas();
@@ -430,9 +430,9 @@ export const ChatInterface = () => {
     const hasIndexedSop = sopDocuments.some((d) => d.status === "indexed" && d.content);
     const hasPriorScripts = Boolean(
       baseScripts?.python?.trim() ||
-        generatedScripts?.python?.trim() ||
-        baseScripts?.playwright?.trim() ||
-        generatedScripts?.playwright?.trim(),
+      generatedScripts?.python?.trim() ||
+      baseScripts?.playwright?.trim() ||
+      generatedScripts?.playwright?.trim(),
     );
 
     const classifyUiIntent = (msg: string): "code" | "explain" => {
@@ -470,11 +470,11 @@ export const ChatInterface = () => {
 
     const matchesUploadedTitle = referencedPdfName
       ? sopDocuments.some(
-          (d) =>
-            d.status === "indexed" &&
-            typeof d.title === "string" &&
-            d.title.toLowerCase().includes(referencedPdfName.toLowerCase()),
-        )
+        (d) =>
+          d.status === "indexed" &&
+          typeof d.title === "string" &&
+          d.title.toLowerCase().includes(referencedPdfName.toLowerCase()),
+      )
       : false;
 
     if (uiIntent === "code" && mentionsUploadedDoc && (!hasIndexedSop || (referencedPdfName && !matchesUploadedTitle))) {
@@ -689,18 +689,18 @@ export const ChatInterface = () => {
 
       const seleniumArtifact: Artifact | null = pythonScript
         ? {
-            content: pythonScript,
-            language: "python",
-            version_id: newId(),
-          }
+          content: pythonScript,
+          language: "python",
+          version_id: newId(),
+        }
         : null;
 
       const maybePlaywrightArtifact: Artifact | null = playwrightScript
         ? {
-            content: playwrightScript,
-            language: "python",
-            version_id: newId(),
-          }
+          content: playwrightScript,
+          language: "python",
+          version_id: newId(),
+        }
         : null;
 
       const refs: ArtifactRef[] = [];
@@ -791,92 +791,92 @@ export const ChatInterface = () => {
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-  if (file.type !== "application/pdf") {
-    toast.error("Please upload a PDF file");
-    event.target.value = "";
-    return;
-  }
+    if (file.type !== "application/pdf") {
+      toast.error("Please upload a PDF file");
+      event.target.value = "";
+      return;
+    }
 
-  setIsProcessing(true);
-  const loadingToast = toast.loading(`Uploading "${file.name}"...`);
+    setIsProcessing(true);
+    const loadingToast = toast.loading(`Uploading "${file.name}"...`);
 
-  try {
-    // Create FormData and upload via fetch. No auth or user_id required in dev mode.
-    const formData = new FormData();
-    formData.append("file", file);
+    try {
+      // Create FormData and upload via fetch. No auth or user_id required in dev mode.
+      const formData = new FormData();
+      formData.append("file", file);
 
-    const response = await fetch(
-      `${supabase.supabaseUrl}/functions/v1/process-sop`,
-      {
-        method: "POST",
-        body: formData,
+      const response = await fetch(
+        `${supabase.supabaseUrl}/functions/v1/process-sop`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Upload failed");
       }
-    );
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Upload failed");
+      const data = await response.json();
+
+      if (data.error) throw new Error(data.error);
+
+      const parsedTargetUrls: string[] = Array.isArray(data.targetUrls)
+        ? data.targetUrls.map((u: unknown) => String(u).trim()).filter((u: string) => u.length > 0)
+        : [];
+
+      toast.dismiss(loadingToast);
+      toast.success(
+        `SOP "${data.title || file.name}" uploaded successfully and processed for this session.`,
+      );
+
+      // Store SOP locally so it can be used as context in generate-script.
+      const newDoc: SOPDocument = {
+        id: data.sopId || `${Date.now()}`,
+        title: data.title || file.name,
+        filename: file.name,
+        status: "indexed",
+        created_at: new Date().toISOString(),
+        content: data.fullContent || data.content || "",
+        targetUrls: parsedTargetUrls,
+      };
+
+      setSopDocuments((prev) => [newDoc, ...prev]);
+      setUploadedDocument(newDoc.title);
+      setAutoTargetUrls(parsedTargetUrls);
+
+      if (parsedTargetUrls.length > 0) {
+        // Auto-enable pre-flight with the SOP-provided Target URLs, but let the user turn it off.
+        setTargetUrl(parsedTargetUrls.join("\n"));
+        setUsePreflight(true);
+        setShowPreflightSetup(true);
+      } else {
+        // No Target URLs found in the SOP; user can still enable pre-flight manually via the toggle.
+        setTargetUrl("");
+        setUsePreflight(false);
+        setShowPreflightSetup(false);
+      }
+
+      setLastPreflightJobId(null);
+
+      // Set suggested message
+      setMessage(
+        `Generate a Python automation script based on the uploaded SOP: ${data.title || file.name}`,
+      );
+
+    } catch (error) {
+      console.error("Error uploading SOP:", error);
+      toast.dismiss(loadingToast);
+      toast.error(error instanceof Error ? error.message : "Failed to upload SOP. Please try again.");
+    } finally {
+      setIsProcessing(false);
+      event.target.value = "";
     }
-
-    const data = await response.json();
-
-    if (data.error) throw new Error(data.error);
-
-    const parsedTargetUrls: string[] = Array.isArray(data.targetUrls)
-      ? data.targetUrls.map((u: unknown) => String(u).trim()).filter((u: string) => u.length > 0)
-      : [];
-
-    toast.dismiss(loadingToast);
-    toast.success(
-      `SOP "${data.title || file.name}" uploaded successfully and processed for this session.`,
-    );
-
-    // Store SOP locally so it can be used as context in generate-script.
-    const newDoc: SOPDocument = {
-      id: data.sopId || `${Date.now()}`,
-      title: data.title || file.name,
-      filename: file.name,
-      status: "indexed",
-      created_at: new Date().toISOString(),
-      content: data.fullContent || data.content || "",
-      targetUrls: parsedTargetUrls,
-    };
-
-    setSopDocuments((prev) => [newDoc, ...prev]);
-    setUploadedDocument(newDoc.title);
-    setAutoTargetUrls(parsedTargetUrls);
-
-    if (parsedTargetUrls.length > 0) {
-      // Auto-enable pre-flight with the SOP-provided Target URLs, but let the user turn it off.
-      setTargetUrl(parsedTargetUrls.join("\n"));
-      setUsePreflight(true);
-      setShowPreflightSetup(true);
-    } else {
-      // No Target URLs found in the SOP; user can still enable pre-flight manually via the toggle.
-      setTargetUrl("");
-      setUsePreflight(false);
-      setShowPreflightSetup(false);
-    }
-
-    setLastPreflightJobId(null);
-
-    // Set suggested message
-    setMessage(
-      `Generate a Python automation script based on the uploaded SOP: ${data.title || file.name}`,
-    );
-
-  } catch (error) {
-    console.error("Error uploading SOP:", error);
-    toast.dismiss(loadingToast);
-    toast.error(error instanceof Error ? error.message : "Failed to upload SOP. Please try again.");
-  } finally {
-    setIsProcessing(false);
-    event.target.value = "";
-  }
-};
+  };
 
   const handleOpenConfig = () => {
     const active = activeArtifact;
@@ -1077,37 +1077,37 @@ export const ChatInterface = () => {
                         <p className={cn("text-sm text-white", "leading-relaxed")}>{msg.content}</p>
                       )
                     ) : (
-                    <div>
-                      <div className={cn("text-sm", msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed", "text-white/90")}>
-                        <ReactMarkdown
-                          components={{
-                            h3: ({ node, className, ...props }) => (
-                              <h3
-                                {...props}
-                                className={cn("mt-4 mb-2 text-sm font-semibold text-white", className)}
-                              />
-                            ),
-                            strong: ({ node, className, ...props }) => (
-                              <strong {...props} className={cn("font-semibold text-white", className)} />
-                            ),
-                            em: ({ node, className, ...props }) => (
-                              <em {...props} className={cn("italic text-white/60", className)} />
-                            ),
-                            ul: ({ node, className, ...props }) => (
-                              <ul {...props} className={cn("list-disc pl-5 space-y-1", className)} />
-                            ),
-                            li: ({ node, className, ...props }) => (
-                              <li {...props} className={cn("text-white/90", className)} />
-                            ),
-                            p: ({ node, className, ...props }) => (
-                              <p {...props} className={cn("text-white/90", className)} />
-                            ),
-                          }}
-                        >
-                          {msg.intro}
-                        </ReactMarkdown>
-                      </div>
-                      {msg.artifacts.map((a) => (
+                      <div>
+                        <div className={cn("text-sm", msg.role === "assistant" ? "leading-[1.6]" : "leading-relaxed", "text-white/90")}>
+                          <ReactMarkdown
+                            components={{
+                              h3: ({ node, className, ...props }) => (
+                                <h3
+                                  {...props}
+                                  className={cn("mt-4 mb-2 text-sm font-semibold text-white", className)}
+                                />
+                              ),
+                              strong: ({ node, className, ...props }) => (
+                                <strong {...props} className={cn("font-semibold text-white", className)} />
+                              ),
+                              em: ({ node, className, ...props }) => (
+                                <em {...props} className={cn("italic text-white/60", className)} />
+                              ),
+                              ul: ({ node, className, ...props }) => (
+                                <ul {...props} className={cn("list-disc pl-5 space-y-1", className)} />
+                              ),
+                              li: ({ node, className, ...props }) => (
+                                <li {...props} className={cn("text-white/90", className)} />
+                              ),
+                              p: ({ node, className, ...props }) => (
+                                <p {...props} className={cn("text-white/90", className)} />
+                              ),
+                            }}
+                          >
+                            {msg.intro}
+                          </ReactMarkdown>
+                        </div>
+                        {msg.artifacts.map((a) => (
                           <ArtifactCard
                             key={a.version_id}
                             artifact={a}
@@ -1187,7 +1187,29 @@ export const ChatInterface = () => {
         )}
 
         {/* Prompt Composer */}
-        <div className={cn(isLandingState ? "flex-1 flex items-center" : "")}>
+        <div
+          className={cn(
+            isLandingState ? "flex-1 flex flex-col items-center justify-center gap-7" : "",
+          )}
+        >
+          {isLandingState && (
+            <div className="w-full max-w-[800px] flex flex-col items-start text-left mb-0.1">
+              <div className="flex items-center gap-3 mb-1">
+                <img
+                  src="/favicon.png"
+                  alt="HyprTask"
+                  className="h-10 md:h-9 w-auto object-contain"
+                />
+                <h1 className="text-4xl md:text-4xl font-semibold tracking-tight text-white">
+                  Hi Hypr<span className="text-[#8b5cf6]">Dev</span>
+                </h1>
+              </div>
+              <p className="text-lg md:text-4xl text-white/70 font-medium ml-1">
+                What are we building today?
+              </p>
+            </div>
+          )}
+
           <div className="w-full rounded-2xl border border-white/10 bg-[#0f172a]/80 backdrop-blur-[12px] p-3 shadow-sm transition-all duration-300 ease-in-out">
             {/* Attached SOPs (show inside prompt box) */}
             {sopDocuments.length > 0 && (
