@@ -1023,10 +1023,10 @@ export const ChatInterface = () => {
               <Card
                 key={msg.id}
                 className={cn(
-                  "p-4 transition-all",
+                  "transition-all",
                   msg.role === "user"
-                    ? "ml-auto max-w-[85%] border-0 bg-white/5 text-white rounded-2xl rounded-br-sm"
-                    : "mr-auto max-w-[85%] border-0 bg-transparent text-white/90",
+                    ? "ml-auto w-fit max-w-[85%] border-0 bg-[#1e293b]/80 text-white rounded-2xl rounded-br-sm px-4 py-2.5"
+                    : "mr-auto max-w-[85%] border-0 bg-transparent text-white/90 p-4",
                 )}
               >
                 <div className="flex items-start gap-3">
