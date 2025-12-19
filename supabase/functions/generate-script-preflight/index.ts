@@ -377,10 +377,23 @@ COOKIE / CONSENT POPUPS (DEFENSIVE HANDLING):
   - Only attempt to interact with cookie/consent banners when corresponding elements actually exist in the DOM.
   - Always wrap banner handling in try/except; failure to find a banner MUST NOT break the workflow.
   - Do not hard-code assumptions that a banner will always appear.
-  - AFTER clicking a cookie/consent button or container, you MUST wait for the banner container to become invisible using:
-    WebDriverWait(driver, TIMEOUT).until(EC.invisibility_of_element_located((By.ID, "THE_BANNER_CONTAINER_ID")))
-    (or an equivalent locator when id is not available).
-  - Never proceed to the next click on the underlying page until the invisibility wait above has completed, otherwise ElementClickIntercepted errors will occur.
+
+BANNER DISMISSAL MUST PREVENT CLICK-INTERCEPTED (MANDATORY):
+1. Identify the banner "action" control (Accept/Agree/Close/Dismiss) using selectors from DOM context.
+2. Identify the banner *parent container* (NOT the button). Prefer, in this order:
+   - A stable id on the banner container, OR
+   - The nearest ancestor with role="dialog" or aria-modal="true", OR
+   - A banner root container referenced in DOM context.
+3. Click the action control.
+4. Immediately wait for the *parent container* to become invisible:
+   WebDriverWait(driver, TIMEOUT).until(EC.invisibility_of_element_located((By.ID, "BANNER_CONTAINER_ID")))
+   (or equivalent By.CSS_SELECTOR / By.XPATH locator for that parent container).
+5. Add a buffer: time.sleep(2) AFTER invisibility to let layout stabilize.
+6. For the first click after banner dismissal:
+   - Try element.click();
+   - If ElementClickInterceptedException still occurs, fallback to:
+     driver.execute_script("arguments[0].click();", element)
+
 ${cookiesRuntimeNote}
 
 ================================================================================

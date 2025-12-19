@@ -442,6 +442,17 @@ SELECTOR FALLBACKS + VALIDATION (MANDATORY):
   - **url**: current page URL
   - **tried**: ordered list of selector attempts with their strategy (id/css/xpath) and match counts (or exception)
 
+COOKIE / CONSENT POPUPS (CLICK-INTERCEPT DEFENSE):
+- Only interact with cookie/consent banners when the element exists in the DOM context.
+- Identify the banner action control (Accept/Agree/Close/Dismiss).
+- Identify the banner *parent container* (not the button). Prefer id, then role="dialog" / aria-modal="true" ancestor.
+- After clicking the action control, you MUST wait for the parent container to become invisible using:
+  WebDriverWait(driver, TIMEOUT).until(EC.invisibility_of_element_located((By.ID, "BANNER_CONTAINER_ID")))
+  (or equivalent By.CSS_SELECTOR / By.XPATH locator).
+- Add time.sleep(2) after invisibility to allow layout stabilization.
+- For the first click after banner dismissal, if element.click() is intercepted, fallback to:
+  driver.execute_script("arguments[0].click();", element)
+
 ================================================================================
 MANDATORY ANTI-DETECTION FEATURES (MUST INCLUDE IN ALL SCRIPTS)
 ================================================================================
