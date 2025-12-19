@@ -291,11 +291,90 @@ def _is_visible_and_unique(driver: webdriver.Chrome, by: str, value: str) -> boo
         return False
 
 
-def _collect_visible_interactive_elements(driver: webdriver.Chrome) -> list[dict]:
-    """Collect visible, interactive elements from the LIVE DOM (not just page_source)."""
+def _collect_visible_interactive_elements(
+    driver: webdriver.Chrome,
+    sop_phrases: list[str],
+    sop_keywords: list[str],
+    defensive_keywords: list[str],
+    *,
+    min_score: int = 25,
+    max_results: int = 40,
+) -> list[dict]:
+    """Collect visible, interactive elements from the LIVE DOM and prune by SOP semantics.
+
+    This runs a lightweight scoring pass **in the browser** and returns only the highest-signal
+    candidates to reduce "attention dilution" and token usage downstream.
+    """
 
     js = r"""
+    const sopPhrases = Array.isArray(arguments[0]) ? arguments[0] : [];
+    const sopKeywords = Array.isArray(arguments[1]) ? arguments[1] : [];
+    const defensive = Array.isArray(arguments[2]) ? arguments[2] : [];
+    const minScore = (typeof arguments[3] === 'number') ? arguments[3] : 25;
+    const maxResults = (typeof arguments[4] === 'number') ? arguments[4] : 40;
+
     const normWs = (s) => (s || "").replace(/\s+/g, " ").trim();
+    const lower = (s) => normWs(String(s || '')).toLowerCase();
+
+    const getCombinedText = (el) => {
+      const tag = (el.tagName || '').toLowerCase();
+      const text = normWs(el.innerText || el.textContent || '');
+      const value = (tag === 'input' || tag === 'textarea') ? (el.value || '') : '';
+      const placeholder = el.getAttribute('placeholder') || '';
+      const aria = el.getAttribute('aria-label') || '';
+      const title = el.getAttribute('title') || '';
+      return lower(`${text} ${value} ${placeholder} ${aria} ${title}`);
+    };
+
+    const calculateSemanticScore = (el) => {
+      let score = 0;
+      const tag = (el.tagName || '').toLowerCase();
+      const role = lower(el.getAttribute('role') || '');
+      const combined = getCombinedText(el);
+
+      // Structural base
+      if (['button','input','select','textarea'].includes(tag)) score += 20;
+      if (tag === 'a' && el.href) score += 15;
+      if (role) score += 5;
+
+      // SOP exact phrases (+50 each hit, capped)
+      let phraseHits = 0;
+      for (const p of sopPhrases.slice(0, 10)) {
+        const pl = lower(p);
+        if (pl && combined.includes(pl)) {
+          phraseHits += 1;
+          score += 50;
+          if (phraseHits >= 2) break;
+        }
+      }
+
+      // SOP keywords (+15 per hit, capped)
+      let kwHits = 0;
+      for (const k of sopKeywords.slice(0, 30)) {
+        const kl = lower(k);
+        if (kl && combined.includes(kl)) {
+          kwHits += 1;
+          score += 15;
+          if (kwHits >= 4) break;
+        }
+      }
+
+      // Defensive unblockers (+10 per hit, capped)
+      let defHits = 0;
+      for (const d of defensive) {
+        const dl = lower(d);
+        if (dl && combined.includes(dl)) {
+          defHits += 1;
+          score += 10;
+          if (defHits >= 3) break;
+        }
+      }
+
+      // Context boost: inside form/fieldset/section (+10)
+      if (el.closest('form, fieldset, section')) score += 10;
+
+      return score;
+    };
 
     const isVisible = (el) => {
       if (!el) return false;
@@ -390,6 +469,9 @@ def _collect_visible_interactive_elements(driver: webdriver.Chrome) -> list[dict
         if (t === 'hidden') continue;
       }
 
+      const score = calculateSemanticScore(el);
+      if (score < minScore) continue;
+
       const attrs = {};
       for (const name of attrNames) {
         const v = el.getAttribute(name);
@@ -408,16 +490,18 @@ def _collect_visible_interactive_elements(driver: webdriver.Chrome) -> list[dict
         tag,
         text,
         label_text: labelText,
+        score,
         attributes: attrs,
         form_context: formContext,
         section_context: sectionContext,
       });
     }
 
-    return out;
+    out.sort((a, b) => (b.score || 0) - (a.score || 0));
+    return out.slice(0, maxResults);
     """
 
-    raw = driver.execute_script(js)
+    raw = driver.execute_script(js, sop_phrases, sop_keywords, defensive_keywords, int(min_score), int(max_results))
     return raw if isinstance(raw, list) else []
 
 
@@ -588,7 +672,15 @@ def get_optimized_elements(driver: webdriver.Chrome, sop_text: str | None = None
 
     has_sop_targets = bool(sop_keywords or sop_phrases)
 
-    raw_elements = _collect_visible_interactive_elements(driver)
+    # Programmatic DOM tree pruning: only return top-scored candidates from the browser.
+    raw_elements = _collect_visible_interactive_elements(
+        driver,
+        sop_phrases,
+        list(sop_keywords),
+        DEFENSIVE_KEYWORDS,
+        min_score=25,
+        max_results=40,
+    )
 
     for el in raw_elements:
         tag = (el.get("tag") or "").lower()
@@ -620,9 +712,9 @@ def get_optimized_elements(driver: webdriver.Chrome, sop_text: str | None = None
         blob = _norm_ws(" ".join(blob_parts))
         lower_blob = blob.lower()
 
-        # Scoring
-        score = 5
-        match_reasons: list[str] = ["Interactive+Visible"]
+        # Start from browser-computed semantic score (already SOP-guided + pruned).
+        score = int(el.get("score") or 0) or 5
+        match_reasons: list[str] = ["VISIBLE_INTERACTIVE"]
 
         # SOP phrase matching (exact + fuzzy)
         phrase_hit = None
@@ -630,14 +722,14 @@ def get_optimized_elements(driver: webdriver.Chrome, sop_text: str | None = None
             if phrase and phrase in lower_blob:
                 phrase_hit = phrase
                 score += 60
-                match_reasons.append(f"SOP EXACT PHRASE: '{phrase}'")
+                match_reasons.append("SOP_EXACT_PHRASE")
                 break
 
         if not phrase_hit:
             for phrase in sop_phrases:
                 if phrase and _fuzzy_phrase_match(phrase, lower_blob):
                     score += 35
-                    match_reasons.append(f"SOP FUZZY PHRASE: '{phrase}'")
+                    match_reasons.append("SOP_FUZZY_PHRASE")
                     break
 
         # SOP keyword matching (exact + constrained fuzzy)
@@ -648,7 +740,7 @@ def get_optimized_elements(driver: webdriver.Chrome, sop_text: str | None = None
         if sop_hits:
             capped = sop_hits[:5]
             score += 12 * min(len(capped), 5)
-            match_reasons.append(f"SOP Keywords: {','.join(capped)}")
+            match_reasons.append("SOP_KEYWORDS")
 
         # Defensive matches: keep blockers even when SOP is very narrow.
         defensive_hits: list[str] = []
@@ -657,7 +749,7 @@ def get_optimized_elements(driver: webdriver.Chrome, sop_text: str | None = None
                 defensive_hits.append(kw)
         if defensive_hits:
             score += 15 * len(set(defensive_hits))
-            match_reasons.append(f"Defensive match: {', '.join(sorted(set(defensive_hits)))}")
+            match_reasons.append("DEFENSIVE")
 
         # Boost elements inside related forms/sections if those contexts match SOP.
         context_blob = ""
@@ -672,12 +764,12 @@ def get_optimized_elements(driver: webdriver.Chrome, sop_text: str | None = None
                 kw and (kw in context_blob or _fuzzy_token_match(kw, context_blob)) for kw in list(sop_keywords)[:20]
             ):
                 score += 18
-                match_reasons.append("BOOST: inside SOP-related form/section")
+                match_reasons.append("CONTEXT_BOOST")
 
         # HARD FILTER: when SOP exists, keep only SOP-matching or defensive-matching elements.
         if has_sop_targets:
-            sop_matched = any(r.startswith("SOP ") for r in match_reasons)
-            defensive_matched = any(r.startswith("Defensive match") for r in match_reasons)
+            sop_matched = any(r.startswith("SOP_") for r in match_reasons)
+            defensive_matched = "DEFENSIVE" in match_reasons
             if not sop_matched and not defensive_matched:
                 continue
 
@@ -721,7 +813,7 @@ def get_optimized_elements(driver: webdriver.Chrome, sop_text: str | None = None
 
     interactive_elements.sort(
         key=lambda e: (
-            any(isinstance(r, str) and r.startswith("SOP ") for r in e.get("match_reasons", [])),
+            any(isinstance(r, str) and r.startswith("SOP_") for r in e.get("match_reasons", [])),
             e.get("score", 0),
             max([s.get("stability", 0) for s in (e.get("selectors") or [])] or [0]),
         ),

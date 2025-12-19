@@ -208,77 +208,71 @@ serve(async (req) => {
 
     if (structuredExtraction) {
       const maxPages = 5;
-      const maxElementsPerPage = 80;
       const entries = Object.entries(structuredExtraction).slice(0, maxPages);
 
+      // Build an "Intelligent DOM Map" by only including top-tier, SOP-relevant elements.
+      // This reduces token usage dramatically and improves grounding accuracy.
       const parts: string[] = [];
+      parts.push("\n\n=== INTELLIGENT DOM MAP (PROGRAMMATICALLY SCORED) ===");
+      parts.push("Only high-relevance, visible interactive elements are listed below. Use ONLY these selectors/attributes.");
 
       for (const [url, data] of entries) {
         const page = data as { title?: string; interactive_elements?: any[]; element_count?: number };
         const title = page.title ?? "";
         const elements = Array.isArray(page.interactive_elements) ? page.interactive_elements : [];
 
-        parts.push(`\n\n=== PAGE: ${url} (Title: ${title}) ===`);
-        parts.push(`Total interactive elements (SOP-guided + scored): ${page.element_count ?? elements.length}`);
-        parts.push("INTERACTIVE ELEMENTS (pre-filtered & scored):");
+        // Filter to top-tier elements.
+        const scored = elements
+          .filter((el) => typeof el?.score === "number")
+          .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
-        for (const el of elements.slice(0, maxElementsPerPage)) {
-          const tag = el.tag ?? "";
-          const text = (el.text ?? "").toString().slice(0, 160);
+        // Threshold + cap per page to avoid attention dilution.
+        const topTier = scored.filter((el) => (el.score ?? 0) >= 35).slice(0, 25);
+
+        parts.push(`\n\n=== PAGE: ${url} (Title: ${title}) ===`);
+        parts.push(`Top-tier elements included: ${topTier.length}`);
+
+        for (const el of topTier) {
+          const tag = (el.tag ?? "").toString();
+          const text = (el.text ?? "").toString().slice(0, 120);
           const attrs = el.attributes ?? {};
-          const selector = el.suggested_selector ?? "";
           const selectors: Array<{ by?: string; value?: string; stability?: number; reason?: string }> = Array.isArray(
             el.selectors,
           )
             ? (el.selectors as Array<{ by?: string; value?: string; stability?: number; reason?: string }> )
             : [];
-          const score = typeof el.score === "number" ? el.score : undefined;
-          const matchReasons: string[] = Array.isArray(el.match_reasons)
-            ? (el.match_reasons as string[])
-            : [];
 
-          const attrBits: string[] = [];
-          if (attrs.id) attrBits.push(`id=\"${attrs.id}\"`);
-          if (attrs.name) attrBits.push(`name=\"${attrs.name}\"`);
-          if (attrs.class) {
-            const classVal = Array.isArray(attrs.class) ? attrs.class.join(" ") : attrs.class;
-            attrBits.push(`class="${classVal}"`);
-          }
-          if (attrs.role) attrBits.push(`role=\"${attrs.role}\"`);
-          if (attrs.placeholder) attrBits.push(`placeholder=\"${attrs.placeholder}\"`);
-          if (attrs["aria-label"]) attrBits.push(`aria-label=\"${attrs["aria-label"]}\"`);
-          if (attrs["data-testid"]) attrBits.push(`data-testid=\"${attrs["data-testid"]}\"`);
+          const bits: string[] = [];
+          const addAttr = (k: string, v: unknown) => {
+            const s = (v ?? "").toString().trim();
+            if (!s) return;
+            // Keep it tight: only include high-signal attributes.
+            if (["id", "name", "role", "placeholder", "aria-label", "data-testid", "href"].includes(k)) {
+              bits.push(`${k}="${s}"`);
+            }
+          };
 
-          const attrStr = attrBits.join(" ");
-          let line = `- <${tag}${attrStr ? " " + attrStr : ""}> text=\"${text}\"`;
+          addAttr("id", attrs.id);
+          addAttr("name", attrs.name);
+          addAttr("role", attrs.role);
+          addAttr("placeholder", attrs.placeholder);
+          addAttr("aria-label", attrs["aria-label"]);
+          addAttr("data-testid", attrs["data-testid"]);
+          addAttr("href", attrs.href);
 
           const selectorBits: string[] = [];
-          for (const s of selectors.slice(0, 6)) {
+          for (const s of selectors.slice(0, 4)) {
             const by = (s.by ?? "").toString();
             const value = (s.value ?? "").toString();
             if (!by || !value) continue;
-            const trimmed = value.length > 140 ? value.slice(0, 140) + "…" : value;
+            const trimmed = value.length > 120 ? value.slice(0, 120) + "…" : value;
             selectorBits.push(`${by}=${trimmed}`);
           }
 
+          let line = `- <${tag}${bits.length ? " " + bits.join(" ") : ""}> text="${text}" score=${el.score}`;
           if (selectorBits.length) {
-            line += ` -> SELECTORS (validated): ${selectorBits.join(" | ")}`;
-          } else if (selector) {
-            // Backwards compatibility
-            line += ` -> SUGGESTED SELECTOR: ${selector}`;
+            line += ` selectors: ${selectorBits.join(" | ")}`;
           }
-
-          const metaBits: string[] = [];
-          if (typeof score === "number") {
-            metaBits.push(`score=${score}`);
-          }
-          if (matchReasons.length) {
-            metaBits.push(`matches: ${matchReasons.join("; ")}`);
-          }
-          if (metaBits.length) {
-            line += ` [${metaBits.join(" | ")}]`;
-          }
-
           parts.push(line);
         }
       }
